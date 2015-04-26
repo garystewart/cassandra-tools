@@ -13,8 +13,9 @@ with TestCassandraCluster {
 
   it  ("Pretty Print CLusterInfo") {
     val cluster = ClusterInfo.createClusterInfo(session)
-    PrettyPrint.prettyPrintKeyspace(cluster,"akkacassandra")
-    PrettyPrint.prettyPrintKeyspace(cluster,"system")
+    PrettyPrint.prettyPrintKeyspace(cluster,"key1")
+    PrettyPrint.prettyPrintKeyspace(cluster,"key2")
+   // ClusterInfo.compare("key1", "key2")
 
    // assert (true)
   }

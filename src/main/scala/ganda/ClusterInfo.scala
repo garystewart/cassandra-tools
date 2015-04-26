@@ -71,10 +71,17 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
 }
 
 case class ClusterInfo(keyspace: List[Keyspace]) {
+//TODO implement compare
+//  def compare (keyspace1: String, keyspace2: String) {
+//     //println ("DIFF:" + keyspace.filter(k => k.keyspace_name==keyspace1)
+//    //.tables.filterNot(keyspace.filter(keyspace_name==keyspace2)).tables.toSet))
+//  }
+
 }
 
 object ClusterInfo {
 
+  //read information from system keyspace and create ClusterInfo
   def createClusterInfo(session: Session): ClusterInfo =  {
     //columns
     val colRes = session.execute(new BoundStatement(session.prepare("select * from system.schema_columns;")))
@@ -96,7 +103,6 @@ object ClusterInfo {
       }
     ).toList
 
-
     //keysapces
     val keyRes = session.execute(new BoundStatement(session.prepare("select * from system.schema_keyspaces;")))
     val clusterInfo = ClusterInfo(keyRes.iterator().map(
@@ -111,8 +117,9 @@ object ClusterInfo {
     )
     clusterInfo
   }
-
 }
+
+
 
 object CQL {
   //TODO make const in upperCamel case

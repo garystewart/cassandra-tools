@@ -26,8 +26,6 @@ trait TestCassandraCluster extends CassandraCluster {
       withCredentials(username, password).
       build().
       connect(keyspace)
-
-  println(session.toString)
 }
 
 /*
