@@ -15,6 +15,7 @@ with TestCassandraCluster {
     val cluster = ClusterInfo.createClusterInfo(session)
     PrettyPrint.prettyPrintKeyspace(cluster,"key1")
     PrettyPrint.prettyPrintKeyspace(cluster,"key2")
+    //cluster.keyspaces.filter(_.keyspace_name =="key2").foreach(_.findPossibleLinks)
    // ClusterInfo.compare("key1", "key2")
 
    // assert (true)

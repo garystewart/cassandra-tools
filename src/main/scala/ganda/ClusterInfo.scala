@@ -68,9 +68,29 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
 
 case class Keyspace(tables: List[Table], properties: Map[String, String]) {
   def keyspace_name = properties.getOrElse("keyspace_name", "")
+
+  def findPossibleLinks: List[String] = {
+    //for each table check if table exists in another table
+    val ret = tables.foldLeft(List("")){ (acc, t) =>
+      acc ++ tables.filter( a =>a.table_name!= t.table_name).
+        foldLeft(List("")){(a1, t1) =>
+        //if we add the list of pk to a set and the set remains the same then we have a potential link!
+        val checkLink = (t1.columns.map(_.column_name).toSet ++ t.pkColumns.map(_.column_name) == t1.columns.map(_.column_name).toSet)
+        val s =" Link " + t.table_name + " to " + t1.table_name + " on ("+ t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name } +") "+ checkLink
+       // println(s)
+        a1 ++ List(s)
+    }
+
+    }
+    //println (ret)
+    ret.filter(_!="")
+   //List("")
+  }
+
+
 }
 
-case class ClusterInfo(keyspace: List[Keyspace]) {
+case class ClusterInfo(keyspaces: List[Keyspace]) {
 //TODO implement compare
 //  def compare (keyspace1: String, keyspace2: String) {
 //     //println ("DIFF:" + keyspace.filter(k => k.keyspace_name==keyspace1)
