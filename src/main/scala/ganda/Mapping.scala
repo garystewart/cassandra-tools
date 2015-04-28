@@ -1,17 +1,10 @@
 package ganda
 
-
-/**
- * Created by M06F525 on 28/04/2015.
- */
-
 object SchemaTypes extends Enumeration {
   val AbstractCommutativeType, AbstractCompositeType, AbstractType, AsciiType, BooleanType, BytesType, CollectionType, ColumnToCollectionType, CompositeType, CounterColumnType, DateType, DecimalType, DoubleType, DynamicCompositeType, EmptyType, FloatType, InetAddressType, Int32Type, IntegerType, LexicalUUIDType, ListType, LocalByPartionerType, LongType, MapType, ReversedType, SetType, TimeUUIDType, TimestampType, TypeParser, UTF8Type, UUIDType = Value
 }
 
-
 //TODO FIX FOR MAP types!!!!
-
 object Mapping {
   private val SCHEMA_PACKAGE: String = "org.apache.cassandra.db.marshal."
 
