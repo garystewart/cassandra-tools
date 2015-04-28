@@ -4,33 +4,37 @@ import com.datastax.driver.core.ColumnDefinitions.Definition
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
 
+//TODO change def to val where it makes sense :-)
 //TODO make enums
 case class Column(properties: Map[String, String]) {
-  def keyspace_name     = properties.getOrElse("keyspace_name", "")
-  def table_name        = properties.getOrElse("columnfamily_name", "")
-  def column_name       = properties.getOrElse("column_name", "")
-  def keyType           = properties.getOrElse("type", "regular")
-  def component_index   = properties.getOrElse("component_index", "-1")
-  def dataType          = CQL.getValidatorAsCQL ( properties.getOrElse("validator", ""))
-  def index_name        = properties.getOrElse("index_name", "")
-  def index_options     = properties.getOrElse("index_options", "")
-  def index_type        = properties.getOrElse("index_type", "")
+  val keyspace_name     = properties.getOrElse("keyspace_name", "")
+  val table_name        = properties.getOrElse("columnfamily_name", "")
+  val column_name       = properties.getOrElse("column_name", "")
+  val keyType           = properties.getOrElse("type", "regular")
+  val component_index   = properties.getOrElse("component_index", "-1")
+  val dataType          = CQL.getValidatorAsCQL ( properties.getOrElse("validator", ""))
+  val index_name        = properties.getOrElse("index_name", "")
+  val index_options     = properties.getOrElse("index_options", "")
+  val index_type        = properties.getOrElse("index_type", "")
 }
 
 case class Table(private val inColumns: List[Column], properties: Map[String, String]) {
-  def keyspace_name     = properties.getOrElse("keyspace_name", "")
-  def table_name        = properties.getOrElse("columnfamily_name", "")
+  val keyspace_name     = properties.getOrElse("keyspace_name", "")
+  val table_name        = properties.getOrElse("columnfamily_name", "")
+  val pkColumns = { inColumns.filter(c => c.keyType == "partition_key").sortBy(_.component_index) }
+  val ckColumns = inColumns.filter(c => c.keyType == "clustering_key").sortBy(_.component_index)
+  val regularColumns = { inColumns.filter(c => c.keyType == "regular").sortBy(_.component_index) }
+  val columns = { pkColumns ++ ckColumns ++ regularColumns }
 
-  def pkColumns = { inColumns.filter(c => c.keyType == "partition_key").sortBy(_.component_index) }
-  def ckColumns = { inColumns.filter(c => c.keyType == "clustering_key").sortBy(_.component_index)}
-  def regularColumns = { inColumns.filter(c => c.keyType == "regular").sortBy(_.component_index) }
-  def columns = { pkColumns ++ ckColumns ++ regularColumns }
-
-  def insertStatement: String ={
+  val insertStatement: String ={
     "INSERT INTO " + table_name +
       " (" + columns.foldLeft(""){(a, column) => a + (if (!a.isEmpty ) ", " else "") + column.column_name  } +
       ") VALUES (" + columns.foldLeft(""){(a, column) => a + (if (!a.isEmpty ) ", " else "") + "?"} + ");"
   }
+
+  //TODO val foo = s"someStrign $somevar ${someExpr}"
+  //val bar = s""" insert into "somefunkyname" """
+
 
   private def deleteStatement(c: List[Column], acc: List[String], stop: Boolean ): List[String] = {
     stop match {
@@ -46,9 +50,11 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
     }
   }
 
-  def deleteStatements: List[String] = { deleteStatement ((pkColumns ++ ckColumns).reverse, List.empty, false) }
+  val deleteStatements: List[String] = { deleteStatement ((pkColumns ++ ckColumns).reverse, List.empty, false) }
 
   private def selectStatement(c: List[Column], acc: List[String], stop: Boolean ): List[String] = {
+    //TODO booleans use IF instead
+    //TODO rewrite using inits
     stop match {
       case false => c match {
         case head :: tail => {
@@ -70,16 +76,16 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
   def keyspace_name = properties.getOrElse("keyspace_name", "")
 
   def findPossibleLinks: List[String] = {
-    //for each table check if table exists in another table
+    //for each table check if link (pks) exists in another table
     val ret = tables.foldLeft(List("")){ (acc, t) =>
       acc ++ tables.filter( a =>a.table_name!= t.table_name).
         foldLeft(List("")){(a1, t1) =>
-        //if we add the list of pk to a set and the set remains the same then we have a potential link!
-        val checkLink = (t1.columns.map(_.column_name).toSet ++ t.pkColumns.map(_.column_name) == t1.columns.map(_.column_name).toSet)
-        val s =" Link " + t.table_name + " to " + t1.table_name + " on ("+ t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name } +") "+ checkLink
-       // println(s)
-        a1 ++ List(s)
-    }
+          //if we add the list of pk to a set and the set remains the same then we have a potential link!
+          val checkLink = (t1.columns.map(_.column_name).toSet ++ t.pkColumns.map(_.column_name) == t1.columns.map(_.column_name).toSet)
+          val s =" Link " + t1.table_name + " to " + t.table_name + " on ("+ t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name } +") "+ checkLink
+         // println(s)
+          a1 ++ List(s)
+      }
 
     }
     //println (ret)

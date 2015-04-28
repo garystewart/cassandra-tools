@@ -23,3 +23,12 @@ ck2 text,
 r1 text,
 PRIMARY KEY (pk1,ck1,ck2)
 ) ;
+
+CREATE TABLE table4  (
+pk1 text,
+ck1 text,
+ck2 text,
+r1 text,
+pk2 text,
+PRIMARY KEY (pk1,ck1,ck2)
+) ;
