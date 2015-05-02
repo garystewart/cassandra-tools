@@ -72,7 +72,9 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
     }.filter(_!="").filter(_.contains("true"))  //only show valid links  TDOD make this a case class
 }
 
-case class ClusterInfo(keyspaces: List[Keyspace]) {
+case class ClusterInfo(keyspaces: List[Keyspace], properties: Map[String, String]) {
+  val cluster_name     = properties.getOrElse("cluster_name", "")
+
 //TODO implement compare
 //  def compare (keyspace1: String, keyspace2: String) {
 //     //println ("DIFF:" + keyspace.filter(k => k.keyspace_name==keyspace1)
@@ -106,6 +108,8 @@ object ClusterInfo {
 
     //keysapces
     val keyRes = session.execute(new BoundStatement(session.prepare("select * from system.schema_keyspaces;")))
+    val localRes = session.execute(new BoundStatement(session.prepare("select * from system.local;")))
+
     val clusterInfo = ClusterInfo(keyRes.iterator().map(
       i => {
         val kName = i.getString("keyspace_name")
@@ -114,7 +118,9 @@ object ClusterInfo {
           f.keyspace_name == kName
         }), CQL.getRowAsProperty(i, Set.empty))
       }
-    ).toList
+    ).toList,
+    //TODO there is only one row in local!  might be better to improve
+      CQL.getRowAsProperty(localRes.one(), Set.empty)
     )
     clusterInfo
   }
