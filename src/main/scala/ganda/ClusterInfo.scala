@@ -11,7 +11,7 @@ case class Column(properties: Map[String, String]) {
   val keyType           = properties.getOrElse("type", "regular")
   val component_index   = properties.getOrElse("component_index", "-1")
   //TODO fix datatypes!  Map, List and Set + Reverse and remove TRY from here
-  val dataType          = try {CQL.getValidatorAsCQL ( properties.getOrElse("validator", "")) } catch {case e: Exception => println ("~Datatype - FIXME" + e)}
+  val dataType          =  CQLMapping.mapCQLTypeFromSchemaColumnsTypeString (properties.getOrElse("validator", ""))
   val index_name        = properties.getOrElse("index_name", "")
   val index_options     = properties.getOrElse("index_options", "")
   val index_type        = properties.getOrElse("index_type", "")
@@ -127,11 +127,6 @@ object CQL {
       //case "map"      => i.getMap(p.getName,String, String)
       case _ => "FIXME: " + p.getType.toString
     }
-  }
-
-  def getValidatorAsCQL (validator: String): String = {
-    //TODO rethink this solution!
-    Mapping.mapCQLTypeFromSchemaColumnsTypeString (validator)
   }
 
   def getRowAsProperty(row: Row, filterName: Set[String]): Map[String, String] = {
