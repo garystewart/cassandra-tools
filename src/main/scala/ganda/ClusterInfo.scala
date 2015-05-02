@@ -34,6 +34,7 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
   //TODO val foo = s"someStrign $somevar ${someExpr}"
   //val bar = s""" insert into "somefunkyname" """
 
+
   val deleteStatements = ckColumns.inits.map(pkColumns ++ _).toList.foldLeft(List[String]()){(acc, col) =>
     val whereList = col.foldLeft("") { (a, col2) => a + (if (!a.isEmpty) " AND " else "") + col2.column_name + " = ?" }
     //println (whereList)
