@@ -20,6 +20,7 @@ case class Column(properties: Map[String, String]) {
 case class Table(private val inColumns: List[Column], properties: Map[String, String]) {
   val keyspace_name     = properties.getOrElse("keyspace_name", "")
   val table_name        = properties.getOrElse("columnfamily_name", "")
+  val comments          = properties.getOrElse("comment", "")
   val pkColumns = { inColumns.filter(c => c.keyType == "partition_key").sortBy(_.component_index) }
   val ckColumns = inColumns.filter(c => c.keyType == "clustering_key").sortBy(_.component_index)
   val regularColumns = { inColumns.filter(c => c.keyType == "regular").sortBy(_.component_index) }
@@ -53,8 +54,11 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
 }
 
+//case class Links (from: Table, to: Table)
+
 case class Keyspace(tables: List[Table], properties: Map[String, String]) {
   val keyspace_name = properties.getOrElse("keyspace_name", "")
+
 
   //for each table check if link (pks) exists in another table
   val findPossibleLinks: List[String] = tables.foldLeft(List("")){ (acc, t) =>
@@ -65,7 +69,7 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
           val s = s" Link ${t1.table_name} to ${t.table_name} on (${t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name }}) $checkLink"
           a1 ++ List(s)
       }
-    }.filter(_!="")
+    }.filter(_!="").filter(_.contains("true"))  //only show valid links  TDOD make this a case class
 }
 
 case class ClusterInfo(keyspaces: List[Keyspace]) {

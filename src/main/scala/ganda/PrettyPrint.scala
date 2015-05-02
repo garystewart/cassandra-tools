@@ -23,7 +23,5 @@ object PrettyPrint {
       println()
     }
     )
-
   }
-
 }
