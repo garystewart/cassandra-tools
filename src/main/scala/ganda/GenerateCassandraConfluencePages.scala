@@ -80,47 +80,54 @@ object GenerateCassandraConfluencePages {
     val CONFLUENCE_TABLE_END: String = "</tbody></table>"
 
     def tableKeyspaceRow (table: Table, k: Keyspace): String = {
-      val size = table.columns.size.toString
-      val possibleLinks = k.findPossibleLinks.filter(_.from.table_name.equals(table.table_name)).foldLeft(""){(a,p) => a + p.to.table_name + " on (" + p.on +")\n" }
-      val tabProp = table.properties.foldLeft(""){(a,p) => a + p + "\n" }
-      val queries = table.statements.foldLeft(""){(a,p) => a + p + "\n" }
+      //not sure why i need this!  seems a version 1.2 difference!
+      //if (table.columns.size > 0) {
+        val size = table.columns.size.toString
 
-      def whichColourClass(keyType: String): String = keyType match  {
-          case "partition_key" => "highlight-green confluenceTd"
-          case "clustering_key" => "highlight-blue confluenceTd"
-          case _ =>"highlight-yellow confluenceTd"
+        val possibleLinks = k.findPossibleLinks.filter(_.from.table_name.equals(table.table_name)).foldLeft(""){(a,p) => a + p.to.table_name + " on (" + p.on +")\n" }
+        val tabProp = table.properties.foldLeft(""){(a,p) => a + p + "\n" }
+        val queries = table.statements.foldLeft(""){(a,s) => a + s + "\n" }
+        val warnings = table.warnings.foldLeft(""){(a,w) => a + w._1 + "\n" }
+
+
+        def whichColourClass(keyType: String): String = keyType match  {
+            case "partition_key" => "highlight-green confluenceTd"
+            case "clustering_key" => "highlight-blue confluenceTd"
+            case _ =>"highlight-yellow confluenceTd"
+          }
+
+        def whichkeyType(keyType: String): String = keyType match  {
+          case "partition_key" => " (pk)"
+          case "clustering_key" => " (ck)"
+          case _ =>""
         }
 
-      def whichkeyType(keyType: String): String = keyType match  {
-        case "partition_key" => " (pk)"
-        case "clustering_key" => " (ck)"
-        case _ =>""
-      }
+        val firstRow =
+          <tr>
+            <td rowspan={size}>{table.table_name}{ Confluence.confluenceCodeBlock("Warnings",warnings,"none")}</td>
+            <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.column_name }{whichkeyType(table.columns.head.keyType)}</td>
+            <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.dataType}</td>
+            <!--<td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.keyType }</td>-->
+            <!--<td rowspan={size}>{ table.comments }</td>-->
+            <!--<td rowspan={size}>{ possibleLinks }</td>-->
+            <td rowspan={size}>
+              { Confluence.confluenceCodeBlock("References",possibleLinks,"none")}
+              { Confluence.confluenceCodeBlock("Properties",tabProp,"scala")}
+              { Confluence.confluenceCodeBlock("Queries",queries,"sql")}
+              { Confluence.confluenceCodeBlock("Comments",table.comments,"none")}
+            </td>
+          </tr>
 
-      val firstRow =
-        <tr>
-          <td rowspan={size}>{table.table_name}</td>
-          <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.column_name }{whichkeyType(table.columns.head.keyType)}</td>
-          <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.dataType}</td>
-          <!--<td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.keyType }</td>-->
-          <!--<td rowspan={size}>{ table.comments }</td>-->
-          <!--<td rowspan={size}>{ possibleLinks }</td>-->
-          <td rowspan={size}>
-            { Confluence.confluenceCodeBlock("References",possibleLinks,"none")}
-            { Confluence.confluenceCodeBlock("Properties",tabProp,"scala")}
-            { Confluence.confluenceCodeBlock("Queries",queries,"sql")}
-            { Confluence.confluenceCodeBlock("Comments",table.comments,"none")}
-          </td>
-        </tr>
+        val restRows = table.columns.tail.foldLeft(""){(a,c) => a +
+          <tr>
+            <td class={whichColourClass(c.keyType)}>{ c.column_name }{whichkeyType(c.keyType)}</td>
+            <td class={whichColourClass(c.keyType)}>{ c.dataType}</td>
+            <!--<td class={whichColourClass(c.keyType)}>{ c.keyType }</td>-->
+          </tr>}
 
-      val restRows = table.columns.tail.foldLeft(""){(a,c) => a +
-        <tr>
-          <td class={whichColourClass(c.keyType)}>{ c.column_name }{whichkeyType(c.keyType)}</td>
-          <td class={whichColourClass(c.keyType)}>{ c.dataType}</td>
-          <!--<td class={whichColourClass(c.keyType)}>{ c.keyType }</td>-->
-        </tr>}
-
-      firstRow + restRows
+        firstRow + restRows
+      //not sure why i need this!
+    //  } else ""
     }
 
     //need <body> tag otherwise ArrayBuilder is shown on confluence
@@ -136,6 +143,8 @@ object GenerateCassandraConfluencePages {
         }
         } + CONFLUENCE_TABLE_END
     ).replace(CONFLUENCE_BR,"<br/>")
+
+
   }
 
   def generateClusterPage(project: String, clusterInfo: ClusterInfo): String= {
@@ -146,10 +155,17 @@ object GenerateCassandraConfluencePages {
     def clusterRow (clusterInfo: ClusterInfo): String = {
       val rows = clusterInfo.keyspaces.foldLeft(""){(a,k) =>
         val keyProp = k.properties.foldLeft(""){(a,p) => a + p + "\n" }
+        val warnings = k.tables.foldLeft(""){(a,t) => a + t.warnings.foldLeft(""){(a1,w) => t.table_name + "="+ a1+w._1} + "\n" }
+//        val warnings = for{
+//          k <- clusterInfo.keyspaces
+//          t <- k.tables
+//          w <- t.warnings
+//        } yield w._1 + "=" + w._2 + "\n"
+
         val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ","+")}+-+${k.keyspace_name}"
         a +
         <tr>
-          <td><a href={href}>{k.keyspace_name}</a></td>
+          <td><a href={href}>{k.keyspace_name}</a>{ Confluence.confluenceCodeBlock("Warnings",warnings,"scala")}</td>
           <td>{ Confluence.confluenceCodeBlock("Properties",keyProp,"scala")}</td>
         </tr>}
 

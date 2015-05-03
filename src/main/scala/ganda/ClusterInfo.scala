@@ -4,6 +4,10 @@ import com.datastax.driver.core.ColumnDefinitions.Definition
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
 
+//TODO val foo = s"someStrign $somevar ${someExpr}"
+//val bar = s""" insert into "somefunkyname" """
+
+
 case class Column(properties: Map[String, String]) {
   val keyspace_name     = properties.getOrElse("keyspace_name", "")
   val table_name        = properties.getOrElse("columnfamily_name", "")
@@ -32,10 +36,6 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
     s"INSERT INTO $table_name ($colList) VALUES ($valuesList);"
   }
 
-  //TODO val foo = s"someStrign $somevar ${someExpr}"
-  //val bar = s""" insert into "somefunkyname" """
-
-
   val deleteStatements = ckColumns.inits.map(pkColumns ++ _).toList.foldLeft(List[String]()){(acc, col) =>
     val whereList = col.foldLeft("") { (a, col2) => a + (if (!a.isEmpty) " AND " else "") + col2.column_name + " = ?" }
     //println (whereList)
@@ -52,6 +52,12 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
   }
 
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
+
+  val warnings: Map[String, String] = {
+    if (columns.size == 1) {
+      Map("Single column table!" -> "")
+    } else Map.empty
+  }
 }
 
 case class Link (from: Table, to: Table, on: String)
@@ -86,10 +92,19 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
     }
   }
 
+
+  val warnings: Map[String, String] = {
+    tables.foldLeft(Map.empty: Map[String, String]) {(a,b)=> a ++ b.warnings}
+  }
+
 }
 
 case class ClusterInfo(keyspaces: List[Keyspace], properties: Map[String, String]) {
   val cluster_name     = properties.getOrElse("cluster_name", "")
+
+
+
+
 
 //TODO implement compare
 //  def compare (keyspace1: String, keyspace2: String) {
@@ -103,7 +118,7 @@ object ClusterInfo {
   //read information from system keyspace and create ClusterInfo
   def createClusterInfo(session: Session): ClusterInfo =  {
     //columns
-    val colRes = session.execute(new BoundStatement(session.prepare("select * from system.schema_columns;")))
+    val colRes = session.execute(new SimpleStatement("select * from system.schema_columns"))
     val columns = colRes.iterator().map(
       row => {
         new Column(CQL.getRowAsProperty(row, Set.empty))
@@ -111,7 +126,7 @@ object ClusterInfo {
     ).toList
 
     //tables
-    val tabRes = session.execute(new BoundStatement(session.prepare("select * from system.schema_columnfamilies;")))
+    val tabRes = session.execute(new SimpleStatement("select * from system.schema_columnfamilies"))
     val tables = tabRes.iterator().map(
       row => {
         //only add tables belonging to keyspace + table
@@ -123,8 +138,8 @@ object ClusterInfo {
     ).toList
 
     //keysapces
-    val keyRes = session.execute(new BoundStatement(session.prepare("select * from system.schema_keyspaces;")))
-    val localRes = session.execute(new BoundStatement(session.prepare("select * from system.local;")))
+    val keyRes = session.execute(new SimpleStatement("select * from system.schema_keyspaces"))
+    val localRes = session.execute(new SimpleStatement("select * from system.local"))
 
     val clusterInfo = ClusterInfo(keyRes.iterator().map(
       i => {
