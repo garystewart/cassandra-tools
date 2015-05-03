@@ -54,14 +54,14 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
 }
 
-//case class Links (from: Table, to: Table)
+case class Link (from: Table, to: Table, on: String)
 
 case class Keyspace(tables: List[Table], properties: Map[String, String]) {
   val keyspace_name = properties.getOrElse("keyspace_name", "")
 
 
   //for each table check if link (pks) exists in another table
-  val findPossibleLinks: List[String] = tables.foldLeft(List("")){ (acc, t) =>
+  val findPossibleLinks2: List[String] = tables.foldLeft(List("")){ (acc, t) =>
       acc ++ tables.filter( a => a.table_name != t.table_name).
         foldLeft(List("")){(a1, t1) =>
           val a = t1.columns.map(_.column_name).toSet
@@ -70,6 +70,22 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
           a1 ++ List(s)
       }
     }.filter(_!="").filter(_.contains("true"))  //only show valid links  TDOD make this a case class
+
+  //for each table check if link (pks) exists in another table
+  val findPossibleLinks: List[Link] = tables.foldLeft(List(): List[Link]){ (acc, t) =>
+    acc ++ tables.filter( a => a.table_name != t.table_name).
+      foldLeft(List(): List[Link]){(a1, t1) =>
+      val a = t1.columns.map(_.column_name).toSet
+      val checkLink = a ++ t.pkColumns.map(_.column_name) == a  //if we add the list of pk to a set and the set remains the same then we have a potential link!
+      //val s = s" Link ${t1.table_name} to ${t.table_name} on (${t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name }}) $checkLink"
+      if (checkLink) {
+        val l = new Link(t1, t , t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name } )
+        a1 ++ List(l)}
+      else
+        a1
+    }
+  }
+
 }
 
 case class ClusterInfo(keyspaces: List[Keyspace], properties: Map[String, String]) {
