@@ -16,14 +16,11 @@ object GenerateCassandraConfluencePages {
 
   def generateKeyspacePage(keyspace: Keyspace): String= {
 
-    val keyProp = keyspace.properties.foldLeft(""){(a,p) => a + p + "\n" }
-
     def tableKeyspaceRow (table: Table, k: Keyspace): String = {
       val size = table.columns.size.toString
       val possibleLinks = k.findPossibleLinks.filter(l => l.from.table_name.equals(table.table_name)).foldLeft(""){(a,p) => a + p.to.table_name + " on (" + p.on +")\n" }
-      val tabProp = table.properties.foldLeft(""){(a,p) => a + p + "\n" }
       val queries = table.statements.foldLeft(""){(a,s) => a + s + "\n" }
-      val warnings = table.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
+      val tableWarnings = table.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
 
       def whichColourClass(keyType: String): String = keyType match  {
         case "partition_key" => "highlight-green confluenceTd"
@@ -40,13 +37,13 @@ object GenerateCassandraConfluencePages {
       //first row is needed due to rowSpan setting (see th element in table header)
       val firstRow =
         <tr>
-          <td rowspan={size}>{table.table_name}{ Confluence.confluenceCodeBlock("Warnings",warnings,"none")}</td>
+          <td rowspan={size}>{table.table_name}{ Confluence.confluenceCodeBlock("Warnings",tableWarnings,"none")}</td>
           <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.column_name }{whichkeyType(table.columns.head.keyType)}</td>
-          <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.dataType}</td>
+          <td class={whichColourClass(table.columns.head.keyType)}>{ table.columns.head.dataTypeLong}</td>
           <td rowspan={size}>
-            { Confluence.confluenceCodeBlock("References",possibleLinks,"none")}
-            { Confluence.confluenceCodeBlock("Properties",tabProp,"scala")}
+            { Confluence.confluenceCodeBlock("CQL",table.cql,"sql")}
             { Confluence.confluenceCodeBlock("Queries",queries,"sql")}
+            { Confluence.confluenceCodeBlock("References",possibleLinks,"none")}
             { Confluence.confluenceCodeBlock("Comments",table.comments,"none")}
           </td>
         </tr>
@@ -54,18 +51,19 @@ object GenerateCassandraConfluencePages {
       val restRows = table.columns.tail.foldLeft(""){(a,c) => a +
         <tr>
           <td class={whichColourClass(c.keyType)}>{ c.column_name }{whichkeyType(c.keyType)}</td>
-          <td class={whichColourClass(c.keyType)}>{ c.dataType}</td>
+          <td class={whichColourClass(c.keyType)}>{ c.dataTypeLong}</td>
         </tr>
       }
 
       firstRow + restRows
     }
 
+    val keyspaceWarnings = keyspace.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
     //The actual keyspace page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
     <body>{CONFLUENCE_WARNING}<hr/>
       <h1>Keyspace: {keyspace.keyspace_name}</h1>
-      <p>{ Confluence.confluenceCodeBlock("Properties", keyProp ,"none")}</p>
+      <p>{ Confluence.confluenceCodeBlock("Warnings", keyspaceWarnings ,"none")}</p>
       <p>{ Confluence.confluenceCodeBlock("Schema",keyspace.schemaScript,"none")}</p>
       <h1>Tables</h1>
       <p>
@@ -83,7 +81,7 @@ object GenerateCassandraConfluencePages {
 
     def clusterRow (clusterInfo: ClusterInfo): String = {
       val rows = clusterInfo.keyspaces.foldLeft(""){(a,k) =>
-        val keyProp = k.properties.foldLeft(""){(a,p) => a + p + "\n" }
+        //val keyProp = k.properties.foldLeft(""){(a,p) => a + p + "\n" }
         val warnings = k.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
 
         val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ","+")}+-+${k.keyspace_name}"
@@ -91,18 +89,20 @@ object GenerateCassandraConfluencePages {
           <tr>
             <td><a href={href}>{k.keyspace_name}</a>{ Confluence.confluenceCodeBlock("Warnings",warnings,"scala")}</td>
             <td>
-              { Confluence.confluenceCodeBlock("Properties",keyProp,"scala")}
+      <!--        { Confluence.confluenceCodeBlock("Properties",keyProp,"scala")}-->
               { Confluence.confluenceCodeBlock("Schema",k.schemaScript,"none")}
             </td>
           </tr>
         }
       rows
     }
-
+    val clusterWarnings = clusterInfo.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
     //The actual cluster page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
       <body>{CONFLUENCE_WARNING}<hr/>
         <h1>Cluster: {clusterInfo.cluster_name}</h1>
+        <p>{ Confluence.confluenceCodeBlock("Warnings", clusterWarnings ,"none")}</p>
+        <h1>Keyspaces</h1>
         <p>
           <table>
             <tbody><tr><th>Keyspace Name</th><th>Extras</th></tr>

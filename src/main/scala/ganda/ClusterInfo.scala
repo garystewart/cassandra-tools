@@ -1,39 +1,45 @@
 package ganda
 
-import com.datastax.driver.core.ColumnDefinitions.Definition
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
 
-
 case class Check (check: String, hasPassed: Boolean, severity: String )
 
-case class Column(properties: Map[String, String]) {
-  val keyspace_name     = properties.getOrElse("keyspace_name", "")
-  val table_name        = properties.getOrElse("columnfamily_name", "")
-  val column_name       = properties.getOrElse("column_name", "")
-  val keyType           = properties.getOrElse("type", "regular")
-  val component_index   = properties.getOrElse("component_index", "-1")
-  val dataType          =  CQLMapping.mapCQLTypeFromSchemaColumnsTypeString (properties.getOrElse("validator", ""))
-  val index_name        = properties.getOrElse("index_name", "")
-  val index_options     = properties.getOrElse("index_options", "")
-  val index_type        = properties.getOrElse("index_type", "")
+case class Column(columnMetadata: ColumnMetadata, keyType: String) {
+  val keyspace_name = columnMetadata.getTable.getKeyspace
+  val table_name    = columnMetadata.getTable.getName
+  val column_name   = columnMetadata.getName
+
+  val dataType      = columnMetadata.getType.getName.toString match {
+    case "list" => s"list <${columnMetadata.getType.getTypeArguments.get(0)}>"
+    case "map"  => s"map <${columnMetadata.getType.getTypeArguments.get(0)}, ${columnMetadata.getType.getTypeArguments.get(1)}>"
+    case "set"  => s"set <${columnMetadata.getType.getTypeArguments.get(0)}>"
+    case _      =>  columnMetadata.getType.getName.toString
+  }
+  val dataTypeLong  = dataType + (if (columnMetadata.isStatic){ " STATIC"} else {""})
+  val index_name    = if (columnMetadata.getIndex != null) {columnMetadata.getIndex.getName} else {""}
+
 
   val checks: List[Check] = {
     List(
-      Check("Index on column exists.", index_name == null, "warning" )
+      //check if secondary index exists on table
+      Check(s"${index_name} index on table ${table_name}.${column_name}!", index_name == "", "warning" ),
+      //check if column names created are not lowercase
+      Check(s"${table_name}.${column_name} is not lower case!", column_name.equals(column_name.toLowerCase()), "warning" )
     )
   }
-
 }
 
-case class Table(private val inColumns: List[Column], properties: Map[String, String]) {
-  val keyspace_name     = properties.getOrElse("keyspace_name", "")
-  val table_name        = properties.getOrElse("columnfamily_name", "")
-  val comments          = properties.getOrElse("comment", "")
-  val pkColumns = { inColumns.filter(c => c.keyType == "partition_key").sortBy(_.component_index) }
-  val ckColumns = inColumns.filter(c => c.keyType == "clustering_key").sortBy(_.component_index)
-  val regularColumns = { inColumns.filter(c => c.keyType == "regular").sortBy(_.component_index) }
-  val columns = { pkColumns ++ ckColumns ++ regularColumns }
+case class Table(tableMetadata: TableMetadata) {
+
+  val keyspace_name                 = tableMetadata.getKeyspace.getName
+  val table_name                    = tableMetadata.getName
+  val comments                      = tableMetadata.getOptions.getComment
+  val cql                           = tableMetadata.exportAsString
+  val pkColumns: List[Column]       = tableMetadata.getPartitionKey.foldLeft(List[Column]()){(a, p) => a ++ List(Column(p, "partition_key" ))}
+  val ckColumns: List[Column]       = tableMetadata.getClusteringColumns.foldLeft(List[Column]()){(a, p) => a ++ List(Column(p, "clustering_key" ))}
+  val regularColumns: List[Column]  = tableMetadata.getColumns.filter(c => !tableMetadata.getPrimaryKey.contains(c)).foldLeft(List[Column]()){(a, p) => a ++ List(Column(p, "regular" ))}
+  val columns                       = { pkColumns ++ ckColumns ++ regularColumns }
 
   val insertStatement: String ={
     val colList = columns.foldLeft(""){(a, column) => a + (if (!a.isEmpty ) ", " else "") + column.column_name  }
@@ -58,12 +64,15 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
 
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
 
+
+  //TODO extra add checks
   val checks: List[Check] = {
     val tableChecks = List(
-      Check("Single column table.", columns.size != 1, "warning" )
+      Check(s"${table_name} only has a single column!", columns.size != 1, "warning" )
     )
-    //add all column checks
-    columns.foldLeft(tableChecks){(acc, col) => acc ++ col.checks.map(ch => Check(s"${col.column_name} - ${ch.check}", ch.hasPassed, ch.severity)) }
+
+    //Add table and column checks
+    columns.foldLeft(tableChecks){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
   }
 
 }
@@ -71,9 +80,11 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
 
 case class Link (from: Table, to: Table, on: String)
 
-case class Keyspace(tables: List[Table], properties: Map[String, String], schemaScript: String) {
-  val keyspace_name = properties.getOrElse("keyspace_name", "")
+case class Keyspace (keyspaceMetaData: KeyspaceMetadata) {
 
+  val keyspace_name = keyspaceMetaData.getName
+  val schemaScript = keyspaceMetaData.exportAsString()
+  val tables: List[Table] = keyspaceMetaData.getTables.foldLeft(List[Table]()){(a, t)=> a ++ List(Table(t) )}
 
   //for each table check if link (pks) exists in another table
   val findPossibleLinks2: List[String] = tables.foldLeft(List("")){ (acc, t) =>
@@ -101,87 +112,45 @@ case class Keyspace(tables: List[Table], properties: Map[String, String], schema
     }
   }
 
+
+  val ignoreKeyspaces: Set[String] = Set("system_auth","system_traces","system","dse_system")
+  //TODO check for existnace of tables!
   val checks: List[Check] = {
     val keyspaceChecks = List(
-      Check("No tables in schema.", tables.size > 0, "warning" )
+    //check if keyspace is being used - TODO ignore cassandraerrors and mutations!
+      Check(s"No tables in keysapce:$keyspace_name!", tables.size > 0, "warning" ),
+    //check for CassandraErrors table
+      Check("CassandraErrors table does not exist!", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("cassandraerrors")) != 0 , "warning" )
+    //TODO check for mutations table
     )
-    tables.foldLeft(keyspaceChecks){(acc, tab) => acc ++ tab.checks.map(ch => Check(s"${tab.table_name} - ${ch.check}", ch.hasPassed, ch.severity)) }
+    tables.foldLeft(keyspaceChecks){(acc, tab) => acc ++ tab.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
   }
-
 }
 
-case class ClusterInfo(keyspaces: List[Keyspace], properties: Map[String, String]) {
-  val cluster_name     = properties.getOrElse("cluster_name", "")
-
+case class ClusterInfo(cluster_name: String,  keyspaces: List[Keyspace]) {
   //TODO add cluster checks summary
   //TODO implement compare keyspaces - one cluster to another
+
+  //TODO extra add checks
+  val checks: List[Check] = {
+    //TODO Add CLuster checks
+    keyspaces.foldLeft(List[Check]()){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+  }
+
+
 }
+
 
 object ClusterInfo {
 
-  //read information from system keyspace and create ClusterInfo
   def createClusterInfo(session: Session): ClusterInfo =  {
-    //columns
-    val colRes = session.execute(new SimpleStatement("select * from system.schema_columns"))
-    val columns = colRes.iterator().map(
-      row => {
-        new Column(CQL.getRowAsProperty(row, Set.empty))
-      }
-    ).toList
 
-    //tables
-    val tabRes = session.execute(new SimpleStatement("select * from system.schema_columnfamilies"))
-    val tables = tabRes.iterator().map(
-      row => {
-        //only add tables belonging to keyspace + table
-        val name = row.getString("keyspace_name") + "." + row.getString("columnfamily_name")
-        new Table(columns.filter(f => {
-          name == (f.keyspace_name + "." + f.table_name)
-        }), CQL.getRowAsProperty(row, Set.empty))
-      }
-    ).toList
-
-    //keysapces
-    val keyRes = session.execute(new SimpleStatement("select * from system.schema_keyspaces"))
-    val localRes = session.execute(new SimpleStatement("select * from system.local"))
-
-    val clusterInfo = ClusterInfo(keyRes.iterator().map(
-      i => {
-        val kName = i.getString("keyspace_name")
-        //only add tables belonging to keyspace
-        new Keyspace(tables.filter(f => {
-          f.keyspace_name == kName
-        }), CQL.getRowAsProperty(i, Set.empty), session.getCluster.getMetadata.getKeyspace(kName).exportAsString())  //session.getCluster.connect(kName).getCluster.getMetadata.exportSchemaAsString()
-      }
-    ).toList,
-     //TODO there is only one row in local!  might be better to improve
-      CQL.getRowAsProperty(localRes.one(), Set.empty)
-    )
-    println ("All hosts: " + session.getCluster.getMetadata.getAllHosts)
-    println ("Cluster name: " + session.getCluster.getMetadata.getClusterName)
-    println ("CQL: " + session.getCluster.getMetadata.getKeyspace("governance").getTables.iterator().next().asCQLQuery())
-    //println ("CQL: " + session.getCluster.getMetadata.getKeyspace("governance").getTables.iterator().next().getPartitionKey.iterator().next.getIndex.)
-
-    clusterInfo
+      ClusterInfo( session.getCluster.getMetadata.getClusterName ,
+        session.getCluster.getMetadata.getKeyspaces.map(
+          i => { new Keyspace(i) }
+        ).toList
+      )
   }
 }
 
-object CQL {
-  // TODO make functin to also do map set etc
-  def getCQLValueAsString(i: Row, p: Definition): String = {
-    p.getType.toString match {
-      case "varchar" => i.getString(p.getName)
-      case "double" => i.getDouble(p.getName).toString
-      case "int" => i.getInt(p.getName).toString
-      case "boolean" => i.getBool(p.getName).toString
-      //case "map"      => i.getMap(p.getName,String, String)
-      case _ => "FIXME: " + p.getType.toString
-    }
-  }
 
-  def getRowAsProperty(row: Row, filterName: Set[String]): Map[String, String] = {
-    row.getColumnDefinitions.filter(cd => !filterName.contains(cd.getName)).map(p => {
-      (p.getName, CQL.getCQLValueAsString(row, p))
-    }).toMap
-  }
-}
