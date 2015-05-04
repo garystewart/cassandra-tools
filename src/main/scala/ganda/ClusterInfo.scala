@@ -4,9 +4,8 @@ import com.datastax.driver.core.ColumnDefinitions.Definition
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
 
-//TODO val foo = s"someStrign $somevar ${someExpr}"
-//val bar = s""" insert into "somefunkyname" """
 
+case class Check (check: String, hasPassed: Boolean, severity: String )
 
 case class Column(properties: Map[String, String]) {
   val keyspace_name     = properties.getOrElse("keyspace_name", "")
@@ -14,11 +13,17 @@ case class Column(properties: Map[String, String]) {
   val column_name       = properties.getOrElse("column_name", "")
   val keyType           = properties.getOrElse("type", "regular")
   val component_index   = properties.getOrElse("component_index", "-1")
-  //TODO fix datatypes!  Map, List and Set + Reverse and remove TRY from here
   val dataType          =  CQLMapping.mapCQLTypeFromSchemaColumnsTypeString (properties.getOrElse("validator", ""))
   val index_name        = properties.getOrElse("index_name", "")
   val index_options     = properties.getOrElse("index_options", "")
   val index_type        = properties.getOrElse("index_type", "")
+
+  val checks: List[Check] = {
+    List(
+      Check("Index on column exists.", index_name == null, "warning" )
+    )
+  }
+
 }
 
 case class Table(private val inColumns: List[Column], properties: Map[String, String]) {
@@ -53,16 +58,20 @@ case class Table(private val inColumns: List[Column], properties: Map[String, St
 
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
 
-  val warnings: Map[String, String] = {
-    if (columns.size == 1) {
-      Map("Single column table!" -> "")
-    } else Map.empty
+  val checks: List[Check] = {
+    val tableChecks = List(
+      Check("Single column table.", columns.size != 1, "warning" )
+    )
+    //add all column checks
+    columns.foldLeft(tableChecks){(acc, col) => acc ++ col.checks.map(ch => Check(s"${col.column_name} - ${ch.check}", ch.hasPassed, ch.severity)) }
   }
+
 }
+
 
 case class Link (from: Table, to: Table, on: String)
 
-case class Keyspace(tables: List[Table], properties: Map[String, String]) {
+case class Keyspace(tables: List[Table], properties: Map[String, String], schemaScript: String) {
   val keyspace_name = properties.getOrElse("keyspace_name", "")
 
 
@@ -92,9 +101,11 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
     }
   }
 
-
-  val warnings: Map[String, String] = {
-    tables.foldLeft(Map.empty: Map[String, String]) {(a,b)=> a ++ b.warnings}
+  val checks: List[Check] = {
+    val keyspaceChecks = List(
+      Check("No tables in schema.", tables.size > 0, "warning" )
+    )
+    tables.foldLeft(keyspaceChecks){(acc, tab) => acc ++ tab.checks.map(ch => Check(s"${tab.table_name} - ${ch.check}", ch.hasPassed, ch.severity)) }
   }
 
 }
@@ -102,15 +113,8 @@ case class Keyspace(tables: List[Table], properties: Map[String, String]) {
 case class ClusterInfo(keyspaces: List[Keyspace], properties: Map[String, String]) {
   val cluster_name     = properties.getOrElse("cluster_name", "")
 
-
-
-
-
-//TODO implement compare
-//  def compare (keyspace1: String, keyspace2: String) {
-//     //println ("DIFF:" + keyspace.filter(k => k.keyspace_name==keyspace1)
-//    //.tables.filterNot(keyspace.filter(keyspace_name==keyspace2)).tables.toSet))
-//  }
+  //TODO add cluster checks summary
+  //TODO implement compare keyspaces - one cluster to another
 }
 
 object ClusterInfo {
@@ -147,12 +151,17 @@ object ClusterInfo {
         //only add tables belonging to keyspace
         new Keyspace(tables.filter(f => {
           f.keyspace_name == kName
-        }), CQL.getRowAsProperty(i, Set.empty))
+        }), CQL.getRowAsProperty(i, Set.empty), session.getCluster.getMetadata.getKeyspace(kName).exportAsString())  //session.getCluster.connect(kName).getCluster.getMetadata.exportSchemaAsString()
       }
     ).toList,
-    //TODO there is only one row in local!  might be better to improve
+     //TODO there is only one row in local!  might be better to improve
       CQL.getRowAsProperty(localRes.one(), Set.empty)
     )
+    println ("All hosts: " + session.getCluster.getMetadata.getAllHosts)
+    println ("Cluster name: " + session.getCluster.getMetadata.getClusterName)
+    println ("CQL: " + session.getCluster.getMetadata.getKeyspace("governance").getTables.iterator().next().asCQLQuery())
+    //println ("CQL: " + session.getCluster.getMetadata.getKeyspace("governance").getTables.iterator().next().getPartitionKey.iterator().next.getIndex.)
+
     clusterInfo
   }
 }

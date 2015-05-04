@@ -17,7 +17,8 @@ trait ConfigCassandraCluster extends CassandraCluster {
   private val port = cassandraConfig.getInt("port")
   private val username = cassandraConfig.getString("username")
   private val password = cassandraConfig.getString("password")
-  private val keyspace = cassandraConfig.getString("keyspace")
+  //no need to connect to keyspace - yet
+  //private val keyspace = cassandraConfig.getString("keyspace")
   private val hosts = cassandraConfig.getStringList("hosts").toList
 
   lazy val session: Session =
@@ -27,5 +28,6 @@ trait ConfigCassandraCluster extends CassandraCluster {
       withCredentials(username, password).
       withPort(port).
       build().
-      connect(keyspace)
+      //no need to connect to keyspace - yet
+      connect()
 }
