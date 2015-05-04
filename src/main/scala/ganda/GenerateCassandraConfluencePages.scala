@@ -1,6 +1,6 @@
 package ganda
 
-import com.datastax.driver.core.Session
+import com.datastax.driver.core.{Host, Session}
 import nl.ing.confluence.rpc.soap.actions.{Page, Token}
 import nl.ing.confluence.rpc.soap.beans.RemotePage
 import scala.xml.NodeSeq
@@ -18,6 +18,7 @@ object GenerateCassandraConfluencePages {
 
     def tableKeyspaceRow (table: Table, k: Keyspace): String = {
       val size = table.columns.size.toString
+      //TODO implement SORTING!!!
       val possibleLinks = k.findPossibleLinks.filter(l => l.from.table_name.equals(table.table_name)).foldLeft(""){(a,p) => a + p.to.table_name + " on (" + p.on +")\n" }
       val queries = table.statements.foldLeft(""){(a,s) => a + s + "\n" }
       val tableWarnings = table.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
@@ -78,7 +79,8 @@ object GenerateCassandraConfluencePages {
 
 
   def generateClusterPage(project: String, clusterInfo: ClusterInfo): String= {
-
+    //TODO CHECK if keyspaces no longer exist!!
+    //TODO add summary of cluster information
     def clusterRow (clusterInfo: ClusterInfo): String = {
       val rows = clusterInfo.keyspaces.foldLeft(""){(a,k) =>
         //val keyProp = k.properties.foldLeft(""){(a,p) => a + p + "\n" }
@@ -97,10 +99,13 @@ object GenerateCassandraConfluencePages {
       rows
     }
     val clusterWarnings = clusterInfo.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" }
+    val allHosts: String = clusterInfo.hosts.foldLeft(""){(a,h) => a + h + "\n" }
+
     //The actual cluster page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
       <body>{CONFLUENCE_WARNING}<hr/>
         <h1>Cluster: {clusterInfo.cluster_name}</h1>
+        <p>{ Confluence.confluenceCodeBlock("All Hosts", allHosts ,"none")}</p>
         <p>{ Confluence.confluenceCodeBlock("Warnings", clusterWarnings ,"none")}</p>
         <h1>Keyspaces</h1>
         <p>

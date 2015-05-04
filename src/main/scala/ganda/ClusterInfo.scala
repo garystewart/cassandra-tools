@@ -54,8 +54,7 @@ case class Table(tableMetadata: TableMetadata) {
     acc ++ List(delStmt)
   }
 
-  val selectStatements =
-    ckColumns.inits.map(pkColumns ++ _).toList.foldLeft(List[String]()){(acc, col) =>
+  val selectStatements = ckColumns.inits.map(pkColumns ++ _).toList.foldLeft(List[String]()){(acc, col) =>
     val whereList = col.foldLeft("") { (a, col2) => a + (if (!a.isEmpty) " AND " else "") + col2.column_name + " = ?" }
     //println (whereList)
     val selStmt: String = s"SELECT * FROM $table_name WHERE $whereList;"
@@ -65,7 +64,7 @@ case class Table(tableMetadata: TableMetadata) {
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
 
 
-  //TODO extra add checks
+  //TODO extra table checks
   val checks: List[Check] = {
     val tableChecks = List(
       Check(s"${table_name} only has a single column!", columns.size != 1, "warning" )
@@ -127,7 +126,15 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata) {
   }
 }
 
-case class ClusterInfo(cluster_name: String,  keyspaces: List[Keyspace]) {
+//TODO - sort data where makes sense
+
+case class ClusterInfo(metaData: Metadata ) {
+  val cluster_name              = metaData.getClusterName
+  val keyspaces: List[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i) }).toList
+  //val dataCenter
+  //TODO - make nice table of HOST info
+  val hosts                     = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
+  //
   //TODO add cluster checks summary
   //TODO implement compare keyspaces - one cluster to another
 
@@ -136,20 +143,12 @@ case class ClusterInfo(cluster_name: String,  keyspaces: List[Keyspace]) {
     //TODO Add CLuster checks
     keyspaces.foldLeft(List[Check]()){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
   }
-
-
 }
 
-
 object ClusterInfo {
-
+  //TODO no longer necessary!!!?
   def createClusterInfo(session: Session): ClusterInfo =  {
-
-      ClusterInfo( session.getCluster.getMetadata.getClusterName ,
-        session.getCluster.getMetadata.getKeyspaces.map(
-          i => { new Keyspace(i) }
-        ).toList
-      )
+      ClusterInfo( session.getCluster.getMetadata )
   }
 }
 
