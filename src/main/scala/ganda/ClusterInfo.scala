@@ -2,8 +2,9 @@ package ganda
 
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
+import scala.collection.SortedSet
 
-case class Check (check: String, hasPassed: Boolean, severity: String )
+case class Check (name: String, details: String, hasPassed: Boolean, severity: String )
 
 case class Column(columnMetadata: ColumnMetadata, keyType: String) {
   val keyspace_name = columnMetadata.getTable.getKeyspace
@@ -22,10 +23,8 @@ case class Column(columnMetadata: ColumnMetadata, keyType: String) {
 
   val checks: List[Check] = {
     List(
-      //check if secondary index exists on table
-      Check(s"${index_name} index on table ${table_name}.${column_name}!", index_name == "", "warning" ),
-      //check if column names created are not lowercase
-      Check(s"${table_name}.${column_name} is not lower case!", column_name.equals(column_name.toLowerCase()), "warning" )
+      Check("Secondary Index exists", s"$index_name index on table $table_name.$column_name!", index_name == "", "warning" ),
+      Check("ColumnName is non-lowercase", s"$table_name.$column_name is not lower case!", column_name.equals(column_name.toLowerCase), "warning" )
     )
   }
 }
@@ -64,29 +63,31 @@ case class Table(tableMetadata: TableMetadata) {
   val statements = {selectStatements ++ List(insertStatement) ++ deleteStatements}
 
 
-  //TODO extra table checks
+  //TODO extra table checks based on properties
   val checks: List[Check] = {
     val tableChecks = List(
-      Check(s"${table_name} only has a single column!", columns.size != 1, "warning" )
+      Check("Single column table", s"$table_name only has one column!", columns.size != 1, "warning" ),
+      Check("TableName is non-lowercase", s"$table_name is not lower case!", table_name.equals(table_name.toLowerCase), "warning" )
     )
 
     //Add table and column checks
-    columns.foldLeft(tableChecks){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+    columns.foldLeft(tableChecks){(acc, col) => acc ++ col.checks}
   }
-
 }
 
 
 case class Link (from: Table, to: Table, on: String)
 
-case class Keyspace (keyspaceMetaData: KeyspaceMetadata) {
+//TODO nice solution for DC names!
+case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCnames: SortedSet[String]) extends Ordered[Keyspace] {
+
+  def compare(that: Keyspace): Int = this.keyspace_name.toLowerCase compare that.keyspace_name.toLowerCase
 
   val keyspace_name = keyspaceMetaData.getName
   val schemaScript = keyspaceMetaData.exportAsString()
   val tables: List[Table] = keyspaceMetaData.getTables.foldLeft(List[Table]()){(a, t)=> a ++ List(Table(t) )}
-  //val schemaAgreement = keyspaceMetaData.checkSchemaAgreement()
-
-
+  //TODO make more elegant!
+  val dataCenter: SortedSet[String] = keyspaceMetaData.getReplication.filterNot(a => a._1.equals("class")).filterNot(b => b._1.equals("replication_factor")).map(_._1).to
 
   //for each table check if link (pks) exists in another table
   val findPossibleLinks: List[Link] = tables.foldLeft(List(): List[Link]){ (acc, t) =>
@@ -103,28 +104,32 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata) {
     }
   }
 
-
   val ignoreKeyspaces: Set[String] = Set("system_auth","system_traces","system","dse_system")
-  //TODO check for existnace of tables!
+
   val checks: List[Check] = {
     val keyspaceChecks = List(
-    //check if keyspace is being used - TODO ignore cassandraerrors and mutations!
-      Check(s"No tables in keysapce:$keyspace_name!", tables.size > 0, "warning" ),
-    //check for CassandraErrors table
-      Check("CassandraErrors table does not exist!", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("cassandraerrors")) != 0 , "warning" )
-    //TODO check for mutations table
+    //TODO ignore cassandraerrors and mutations otherwise appears to be used!!
+    //TODO check DC names are valid
+      Check("Keyspace is unused check" , s"No tables in keyspace: $keyspace_name!", tables.size > 0, "warning" ),
+      Check("CassandraErrors table check",s"$keyspace_name has no CassandraErrors table.", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("cassandraerrors")) != 0 , "warning" ),
+      Check("ModelMutation table check",s"$keyspace_name has no ModelMutation table.", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("modelmutation")) != 0 , "warning" ),
+      //DC checks a + b = a  so nothing added
+    //TODO remove treeset from DC message!
+      Check("Data Center names check",s"$keyspace_name has incorrect DC names: ${dataCenter}",dataCenter ++ validDCnames == validDCnames   , "warning" )
     )
-    tables.foldLeft(keyspaceChecks){(acc, tab) => acc ++ tab.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+    tables.foldLeft(keyspaceChecks){(acc, tab) => acc ++ tab.checks }
   }
 }
 
-//TODO - sort data where makes sense
+//TODO add Cassandra node object
+//TODO ask about Sorted objkects etc
 
 case class ClusterInfo(metaData: Metadata ) {
-  val cluster_name              = metaData.getClusterName
-  val keyspaces: List[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i) }).toList
-  val schemaAgreement           = metaData.checkSchemaAgreement()
-  //val dataCenter
+  val cluster_name                   = metaData.getClusterName
+  val schemaAgreement                = metaData.checkSchemaAgreement()
+  val dataCenter: SortedSet[String]  = metaData.getAllHosts.groupBy(h => h.getDatacenter).keys.to
+  val keyspaces: SortedSet[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i,dataCenter) }).to
+
   //TODO - make nice table of HOST info
   val hosts                     = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
   //
@@ -133,24 +138,22 @@ case class ClusterInfo(metaData: Metadata ) {
 
   val checks: List[Check] = {
     val clusterChecks = List(
-      Check(s"Cluster schema agreement issues!",schemaAgreement, "warning" )
+      Check("Cluster agreement check", s"Cluster schema agreement issues!",schemaAgreement, "warning" )
     )
-
-    keyspaces.foldLeft(clusterChecks){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+    keyspaces.foldLeft(clusterChecks){(acc, col) => acc ++ col.checks}
   }
 }
-
 
 case class AllClusters (clusterInfoList: List[ClusterInfo]) {
 
   val checks: List[Check] = {
     val clusterChecks = List(
-      Check(s"FIXME!",true, "warning" )
+    //TODO check naming conventions of DC names
+      Check("Check DC names TODO",s"FIXME!",true, "warning" )
     )
-    clusterInfoList.foldLeft(clusterChecks){(acc, clust) => acc ++ clust.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+    clusterInfoList.foldLeft(clusterChecks){(acc, clust) => acc ++ clust.checks}
   }
 }
-
 
 object ClusterInfo {
 
@@ -181,5 +184,3 @@ object ClusterInfo {
     AllClusters(clusterList)
   }
 }
-
-
