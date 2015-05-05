@@ -1,5 +1,7 @@
 package ganda
 
+import java.util.Calendar
+
 import com.datastax.driver.core.{Host, Session}
 import nl.ing.confluence.rpc.soap.actions.{Page, Token}
 import nl.ing.confluence.rpc.soap.beans.RemotePage
@@ -55,7 +57,6 @@ object GenerateCassandraConfluencePages {
           <td class={whichColourClass(c.keyType)}>{ c.dataTypeLong}</td>
         </tr>
       }
-
       firstRow + restRows
     }
 
@@ -78,7 +79,7 @@ object GenerateCassandraConfluencePages {
   }
 
 
-  def generateClusterPage(project: String, clusterInfo: ClusterInfo): String= {
+  def generateClusterInfoPage(project: String, clusterInfo: ClusterInfo): String= {
     //TODO CHECK if keyspaces no longer exist!!
     //TODO add summary of cluster information
     def clusterRow (clusterInfo: ClusterInfo): String = {
@@ -118,25 +119,120 @@ object GenerateCassandraConfluencePages {
       </body>.toString
   }
 
+
+  def generateClusterSummaryPage(allClusters: AllClusters, project: String): String=  {
+
+    val listKeyspace = allClusters.clusterInfoList.flatMap(_.keyspaces).map(_.keyspace_name).toSet
+    val listClusterName = allClusters.clusterInfoList.map(_.cluster_name).toSet
+
+    def whichColourClassBoolean(isTrue: Boolean): String =  if (isTrue) {"highlight-green confluenceTd"} else {"highlight-red confluenceTd"}
+
+
+
+    <body>{CONFLUENCE_WARNING}<hr/>
+      <h1>Cluster Summary</h1>
+      <p>
+        <table>
+          <tbody><tr><th>Cluster Name</th><th>Warnings</th><th>Last Checked</th></tr>
+            {scala.xml.Unparsed( allClusters.clusterInfoList.foldLeft("") { (at, clus) => at +
+            <tr>
+              <td><a href={s"/display/$project/${clus.cluster_name.replace(" ","+")}"}>{clus.cluster_name}</a></td>
+              <td>{ Confluence.confluenceCodeBlock("Warnings", clus.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.check + "\n" } ,"none")}</td>
+              <td>{ Calendar.getInstance.getTime} </td>
+            </tr>
+            } )
+            }
+          </tbody>
+        </table>
+      </p>
+      <h1>Cluster Keyspace Summary</h1>
+      <p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Keyspace Name</th>
+              {scala.xml.Unparsed( listClusterName.foldLeft("") { (acc, clust_name) => acc +
+              <th>{clust_name}</th>})
+              }
+            </tr>
+            {scala.xml.Unparsed( listKeyspace.foldLeft("") { (acc, key: String) => acc +
+            <tr>
+              <td>{ key }</td>
+              {scala.xml.Unparsed( listClusterName.foldLeft("") { (acc, clust_name) =>
+              val isFound = allClusters.clusterInfoList.filter(a => a.cluster_name.equals(clust_name)).flatMap(_.keyspaces).count(a => a.keyspace_name.equals(key)) > 0
+              acc + <td class={whichColourClassBoolean(isFound)}>{ isFound }</td>})
+              }
+            </tr>
+          } )
+            }
+          </tbody>
+        </table>
+      </p>
+    </body>.toString
+  }
+
+
+
+
   def generateAllConfluencePages (project: String, mainPageName: String, session : Session, confluenceUser: String, confluencePassword: String): Unit = {
-    val clusterInfo = ClusterInfo.createClusterInfo(session)
+    val allClusters = ClusterInfo.createClusterInfo(session)
     val token: Token = Token.getInstance
     token.initialise(confluenceUser, confluencePassword)
     val page: Page = new Page
-
-    //Find the main Clusters page
+  //Find the main Clusters page
     val parentPage: RemotePage = page.read(project, mainPageName)
-    val clusterPageName = clusterInfo.cluster_name.toUpperCase
-    //create the specific summary cluster page
-    Confluence.confluenceCreatePage (project,clusterPageName, generateClusterPage(project, clusterInfo), page, parentPage )
-    val clusterParentPage: RemotePage = page.read(project,clusterPageName)
+    //Always update the Cluster page
+    parentPage.setContent( s"<body>${generateClusterSummaryPage(allClusters, project)}</body>")
+    page.store(parentPage)
 
-    //Per keyspace create pages
-    for(k <- clusterInfo.keyspaces)
+    val listKeyspace = allClusters.clusterInfoList.flatMap(_.keyspaces).map(_.keyspace_name).toSet
+    val listClusterName = allClusters.clusterInfoList.map(_.cluster_name).toSet
+
+/*    //Per ClusterInfo - create page
+    for(cl <- allClusters.clusterInfoList)
       yield {
-        val content: String = generateKeyspacePage(k)
-        val keyPageName =  clusterInfo.cluster_name.toUpperCase + " - " + k.keyspace_name.toUpperCase
-        Confluence.confluenceCreatePage (project,keyPageName, content, page, clusterParentPage )
+        val clusterPageName = cl.cluster_name.toUpperCase
+        //create the specific summary cluster page
+        Confluence.confluenceCreatePage (project,clusterPageName, generateClusterInfoPage(project, cl), page, parentPage )
+        val clusterParentPage: RemotePage = page.read(project,clusterPageName)
+
+        //Per keyspace create pages
+        for(k <- cl.keyspaces)
+          yield {
+            val content: String = generateKeyspacePage(k)
+            //SEE DELETE if you change this!!!!!!
+            val keyPageName =  cl.cluster_name.toUpperCase + " - " + k.keyspace_name.toUpperCase
+            Confluence.confluenceCreatePage (project,keyPageName, content, page, clusterParentPage )
+          }
+      }
+      */
+  //clean up pages no longer needed - ie keyspace deleted
+    //TODO add confluence package!
+     val clusterPages =  token.getService.getChildren(token.getToken, parentPage.getId)
+    //clusterPages.foreach(p => println (p.getTitle))
+    def substringAfter(s:String,k:String) = { s.indexOf(k) match { case -1 => ""; case i => s.substring(i+k.length)  } }
+    //start bottom up
+    for(cPage <- clusterPages)
+      yield {
+        val keyspacePages =  token.getService.getChildren(token.getToken, cPage.getId)
+        for(kPage <- keyspacePages)
+          yield {
+            //SEE CREATE if you change this!!!!!!
+            //val keyPageName =  cPage.getTitle.toUpperCase + " - " + k.keyspace_name.toUpperCase
+            //Delete keyspace page if not exists
+            if (allClusters.clusterInfoList.filter(cList => cList.cluster_name.equals(cPage.getTitle)).
+              flatMap(cl => cl.keyspaces).count(k => k.keyspace_name.toUpperCase.equals(substringAfter(kPage.getTitle," - "))) == 0 )
+              {
+                println (s"DELETING page: ${kPage.getTitle}")
+                page.remove(kPage.getId)
+              }
+          }
+        //Delete cluster page if not exists
+        if (!listClusterName.contains(cPage.getTitle))
+        {
+          println (s"DELETING page: ${cPage.getTitle}")
+          page.remove(cPage.getId)
+        }
       }
   }
 }

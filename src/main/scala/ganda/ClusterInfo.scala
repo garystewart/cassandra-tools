@@ -84,17 +84,9 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata) {
   val keyspace_name = keyspaceMetaData.getName
   val schemaScript = keyspaceMetaData.exportAsString()
   val tables: List[Table] = keyspaceMetaData.getTables.foldLeft(List[Table]()){(a, t)=> a ++ List(Table(t) )}
+  //val schemaAgreement = keyspaceMetaData.checkSchemaAgreement()
 
-  //for each table check if link (pks) exists in another table
-  val findPossibleLinks2: List[String] = tables.foldLeft(List("")){ (acc, t) =>
-      acc ++ tables.filter( a => a.table_name != t.table_name).
-        foldLeft(List("")){(a1, t1) =>
-          val a = t1.columns.map(_.column_name).toSet
-          val checkLink = a ++ t.pkColumns.map(_.column_name) == a  //if we add the list of pk to a set and the set remains the same then we have a potential link!
-          val s = s" Link ${t1.table_name} to ${t.table_name} on (${t.pkColumns.foldLeft(""){(a, col) => a + (if (!a.isEmpty ) ", " else "") + col.column_name }}) $checkLink"
-          a1 ++ List(s)
-      }
-    }.filter(_!="").filter(_.contains("true"))  //only show valid links  TDOD make this a case class
+
 
   //for each table check if link (pks) exists in another table
   val findPossibleLinks: List[Link] = tables.foldLeft(List(): List[Link]){ (acc, t) =>
@@ -131,24 +123,62 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata) {
 case class ClusterInfo(metaData: Metadata ) {
   val cluster_name              = metaData.getClusterName
   val keyspaces: List[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i) }).toList
+  val schemaAgreement           = metaData.checkSchemaAgreement()
   //val dataCenter
   //TODO - make nice table of HOST info
   val hosts                     = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
   //
-  //TODO add cluster checks summary
+  //TODO add cluster checks summary  ie check DC names etc!
   //TODO implement compare keyspaces - one cluster to another
 
-  //TODO extra add checks
   val checks: List[Check] = {
-    //TODO Add CLuster checks
-    keyspaces.foldLeft(List[Check]()){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+    val clusterChecks = List(
+      Check(s"Cluster schema agreement issues!",schemaAgreement, "warning" )
+    )
+
+    keyspaces.foldLeft(clusterChecks){(acc, col) => acc ++ col.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
   }
 }
 
+
+case class AllClusters (clusterInfoList: List[ClusterInfo]) {
+
+  val checks: List[Check] = {
+    val clusterChecks = List(
+      Check(s"FIXME!",true, "warning" )
+    )
+    clusterInfoList.foldLeft(clusterChecks){(acc, clust) => acc ++ clust.checks.map(ch => Check(s"${ch.check}", ch.hasPassed, ch.severity)) }
+  }
+}
+
+
 object ClusterInfo {
-  //TODO no longer necessary!!!?
-  def createClusterInfo(session: Session): ClusterInfo =  {
-      ClusterInfo( session.getCluster.getMetadata )
+
+  def createClusterInfo(session: Session): AllClusters =  {
+    val clusterRes = session.execute(new SimpleStatement("select * from cluster where hcpk='hcpk'"))
+
+    val clusterList=
+      clusterRes.foldLeft(List[ClusterInfo]()) { (a, row) =>
+
+      val cluster_name = row.getString("cluster_name")
+      val uname = row.getString("uname")
+      val pword = row.getString("pword")
+      val hosts = row.getString("hosts").split(",")
+      //TODO add error handling and make reactive!
+      lazy val clusSes: Session =
+        Cluster.builder().
+          addContactPoints(hosts: _*).
+          withCompression(ProtocolOptions.Compression.SNAPPY).
+          withCredentials(uname, pword).
+          //withPort(port).
+          build().
+          connect()
+      val clusterInfo = List(ClusterInfo(clusSes.getCluster.getMetadata))
+      clusSes.close()
+
+      a ++  clusterInfo
+    }
+    AllClusters(clusterList)
   }
 }
 
