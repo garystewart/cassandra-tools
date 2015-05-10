@@ -57,7 +57,7 @@ object OpsCenter {
       //per node
     val listNodes = listNodeIP.map(node_ip => {
       val nodeIPres = Http(s"http://$host/$clusName/nodeconf/$node_ip").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
-      new OpsCenterNode (node_ip, CassandraYaml.parseCassandraYaml(nodeIPres))
+      new OpsCenterNode (node_ip, CassandraYaml.parseBody(nodeIPres))
     })
     new OpsCenterClusterInfo(clusName, listNodes)
   })
@@ -65,65 +65,5 @@ object OpsCenter {
    new OpsCenter(login, host, opsCenterClusterInfo)
   }
 }
-
-
-
-
-
-//import spray.json._
-////import DefaultJsonProtocol._
-//
-////case class OpsClusterInfo (name: String, properties: JsValue, nodes: JsValue) {
-//case class OpsClusterInfo (name: String) {
-//}
-//
-//
-
-
-//
-//  //TODO change to json4s
-//  def getClusterConfigs (): List[OpsClusterInfo] = {
-//    //val response: HttpResponse[String] = Http(s"http://$host/cluster-configs").header("opscenter-session", sessionId).header("Accept", "text/json").asString
-//    val clusterConfigRespone = Http(s"http://$host/cluster-configs").header("opscenter-session", sessionId).header("Accept", "text/json").asString.body.parseJson
-//
-//    //per cluster
-//    clusterConfigRespone.asJsObject.fields.map(i => {
-//    //OpsCenter.filterField(parse(clusterConfigRespone), "node_ip").foreach ( i=> {
-//      val clusterName =i._1
-//      val nodesRes = Http(s"http://$host/$clusterName/nodes").header("opscenter-session", sessionId).header("Accept", "text/yaml").asString.body
-//      //val nodesResponseBody =  "{\"nodes\": "  +res + "}"
-//      OpsCenter.filterField(parse(nodesRes), "node_ip").foreach(a => {
-//        val node_ip = a._2.values
-//        println(s"Node found: $node_ip")
-//        val nodeIPres = Http(s"http://$host/$clusterName/nodeconf/$node_ip").header("opscenter-session", sessionId).header("Accept", "text/json").asString.body
-//
-//        println (CassandraYaml.parseCassandraYaml(nodeIPres))
-//
-//        println (nodeIPres)
-//        OpsCenter.filterField(parse(nodeIPres), "concurrent_writes").foreach(b => println (" writes: " + b._2.values))
-//        import org.json4s._
-//        //import org.json4s.native.JsonMethods._
-//        import org.json4s.JsonDSL._
-//        println ((parse(nodeIPres) \\ "concurrent_writes")(0).values)
-//
-//      })
-//
-//      val storageRespone = Http(s"http://$host/$clusterName/storage-capacity").header("opscenter-session", sessionId).header("Accept", "text/json").asString.body.parseJson
-//      println (clusterName +" " + storageRespone)
-//
-//      new OpsClusterInfo(clusterName)// , i._2, clusterConfigRespone)
-//    }).toList
-//  }
-//
-//
-//}
-
-
-//  def filterField (json:  json4s.JValue, fieldName: String) = {
-//    json.filterField {
-//      case JField(`fieldName`, _) => true
-//      case _ => false
-//    }
-//  }
 
 

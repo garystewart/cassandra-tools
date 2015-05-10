@@ -5,14 +5,39 @@ import java.util.Calendar
 import com.datastax.driver.core.{Host, Session}
 import nl.ing.confluence.rpc.soap.actions.{Page, Token}
 import nl.ing.confluence.rpc.soap.beans.RemotePage
+//import org.json4s.DefaultFormats
 import scala.collection.SortedSet
 
 object GenerateCassandraConfluencePages {
 
-  private val CONFLUENCE_WARNING =  <ac:structured-macro ac:name="warning">
-                                      <ac:parameter ac:name="title">GENERATED CODE!!!</ac:parameter>
-                                      <ac:rich-text-body><p>NB!!! This page is generated based on information from Cassandra. PLEASE DON'T EDIT IT!!!</p></ac:rich-text-body>
-                                    </ac:structured-macro>
+  private def CONFLUENCE_HEADER (intro: String) =
+    <ac:structured-macro ac:name="section">
+      <ac:rich-text-body>
+        <ac:structured-macro ac:name="column">
+          <ac:parameter ac:name="width">50%</ac:parameter> <ac:rich-text-body>
+          <h1>General information</h1>
+          <ac:structured-macro ac:name="warning">
+            <ac:parameter ac:name="title">GENERATED CODE!!!</ac:parameter>
+            <ac:rich-text-body><p>NB!!! This page is generated based on information from Cassandra. PLEASE DON'T EDIT IT!!!</p></ac:rich-text-body>
+          </ac:structured-macro>
+          <p>{intro}</p>
+        </ac:rich-text-body>
+        </ac:structured-macro> <ac:structured-macro ac:name="column">
+        <ac:parameter ac:name="width">50%</ac:parameter> <ac:rich-text-body>
+          <ac:structured-macro ac:name="panel">
+            <ac:parameter ac:name="title">What's on this page</ac:parameter> <ac:parameter ac:name="borderStyle">solid</ac:parameter> <ac:rich-text-body>
+            <p>
+              <ac:structured-macro ac:name="toc">
+                <ac:parameter ac:name="maxLevel">4</ac:parameter>
+              </ac:structured-macro>
+            </p>
+          </ac:rich-text-body>
+          </ac:structured-macro>
+        </ac:rich-text-body>
+      </ac:structured-macro>
+      </ac:rich-text-body>
+    </ac:structured-macro>
+
 
 
   def generateKeyspacePage(keyspace: Keyspace): String= {
@@ -62,7 +87,7 @@ object GenerateCassandraConfluencePages {
     val keyspaceWarnings = keyspace.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
     //The actual keyspace page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
-    <body>{CONFLUENCE_WARNING}<hr/>
+    <body>{CONFLUENCE_HEADER("This section summarises all the keyspace information.")}<hr/>
       <h1>Keyspace: {keyspace.keyspace_name}</h1>
       <p>{ Confluence.confluenceCodeBlock("Warnings", keyspaceWarnings ,"none")}</p>
       <p>{ Confluence.confluenceCodeBlock("Schema",keyspace.schemaScript,"none")}</p>
@@ -76,16 +101,6 @@ object GenerateCassandraConfluencePages {
       </p>
     </body>.toString()
   }
-
-
-
-//  <ac:structured-macro ac:name="include">
-//    <ac:parameter ac:name="">
-//      <ac:link>
-//        <a href={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${clusterInfo.cluster_name}"}>Overview</a>
-//      </ac:link>
-//    </ac:parameter>
-//  </ac:structured-macro>|
 
 
   def generateClusterInfoPage(project: String, clusterInfo: ClusterInfo): String= {
@@ -107,27 +122,32 @@ object GenerateCassandraConfluencePages {
       rows
     }
     val clusterWarnings = clusterInfo.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
-  //  val allHosts: String = clusterInfo.hosts.foldLeft(""){(a,h) => a + h + "\n" }
 
-    //<p>{ Confluence.confluenceCodeBlock("All Hosts", allHosts ,"none")}</p>
+    import org.json4s.jackson.Serialization.write
+    import org.json4s._
+    import org.json4s.jackson.JsonMethods._
+    implicit val formats = DefaultFormats
 
     //The actual cluster page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
-      <body>{CONFLUENCE_WARNING}<hr/>
+      <body>{CONFLUENCE_HEADER("This section summarises all the cluster information.")}<hr/>
         <h1>Cluster: {clusterInfo.cluster_name}</h1>
         <p>{ Confluence.confluenceCodeBlock("Warnings", clusterWarnings ,"none")}</p>
           <img src={s"http://graphite-dev.europe.intranet/render?from=-2hours&until=now&width=400&height=250&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.mean&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.max&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.p99&_uniq=0.8728725090622902"}/>
         <h1>Host Information</h1>
         <p>
           <table>
-            <tbody><tr><th>Host Name</th><th>Data Center</th><th>C* Version</th><th>Socket Address</th><th>Extras</th></tr>
+            <tbody><tr><th>Data Center</th><th>Host Name</th><th>IP Address</th><th>C* Version</th><th>Extras</th></tr>
               {scala.xml.Unparsed( clusterInfo.hosts.foldLeft("") { (at, host) => at +
                                             <tr>
-                                              <td>{host.address}</td>
                                               <td>{host.dataCenter}</td>
+                                              <td>{host.canonicalHostName}</td>
+                                              <td>{host.ipAddress}</td>
                                               <td>{host.version}</td>
-                                              <td>{host.socketAddress}</td>
-                                              <td>{ Confluence.confluenceCodeBlock("Yaml", host.opsCenterNode.toString ,"none")}</td>
+                                              <td>{ //val yaml
+                                                val yaml  =  try { pretty(parse( write(host.opsCenterNode)))}
+                                                 catch {case e: Exception => ""}
+                                                Confluence.confluenceCodeBlock("Yaml",yaml  ,"none")}</td>
                                             </tr>
                                             })
               }
@@ -145,47 +165,10 @@ object GenerateCassandraConfluencePages {
       </body>.toString
   }
 
-
-//TODO based on OpsCenter INFO
-//  <table>
-//    <tbody><tr><th>Host Name</th><th>Version</th></tr>
-//      {scala.xml.Unparsed( clusterInfo.opsCenterClusterInfo.headOption match {
-//      case Some(n) =>  n.nodes.foldLeft("") { (at, node) => at +
-//        <tr>
-//          <td>{node.name}</td>
-//          <td>{node.cassandra.concurrent_writes}</td>
-//        </tr>
-//      }
-//      case _ => ""
-//    })
-//      }
-//    </tbody>
-//  </table>
-
-
-
-//  <ac:structured-macro ac:name="html-include">
-//    <ac:parameter ac:name="url">
-//      <ri:url ri:value={s"http://graphite-dev.europe.intranet/render?from=-2hours&until=now&width=400&height=250&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.mean&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.max&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.p99&_uniq=0.8728725090622902"}/>
-//    </ac:parameter>
-//  </ac:structured-macro>
-
-
-
   //TODO - make graphite checker!!!  Seems to be rather messy
   //TODO show info in governance schema
   //this is using graphana!
   def clusterGraphite(cluster_name: String) = <a href={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${cluster_name}"}>Overview</a>
-
-//  Could not access the content at the URL because it is not from an allowed source.
-//  http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=LLDS_1_DEV
-//  You may contact your site administrator and request that this URL be added to the list of allowed sources.
-//    <ac:structured-macro ac:name="html-include">
-//      <ac:parameter ac:name="url">
-//        <ri:url ri:value={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${clusterInfo.cluster_name}"}/>
-//      </ac:parameter>
-//    </ac:structured-macro>
-
 
   def generateClusterSummaryPage(allClusters: AllClusters, project: String): String=  {
 
@@ -194,7 +177,7 @@ object GenerateCassandraConfluencePages {
 
     def whichColourClassBoolean(isTrue: Boolean): String =  if (isTrue) {"highlight-green confluenceTd"} else {"highlight-red confluenceTd"}
 
-    <body>{CONFLUENCE_WARNING}<hr/>
+    <body>{CONFLUENCE_HEADER("This section briefly summarises all the clusters information.")}<hr/>
       <h1>Cluster Summary</h1>
       <p>
         <table>

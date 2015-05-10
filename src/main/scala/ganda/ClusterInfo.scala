@@ -136,10 +136,12 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCname
 //TODO ask about Sorted objkects etc
 
 case class NodeHost (host: Host, opsCenterNode: Option[OpsCenterNode]) {
-  val address        = host.getAddress
-  val version        = host.getCassandraVersion
-  val dataCenter     = host.getDatacenter
-  val socketAddress  = host.getSocketAddress
+  val ipAddress          = host.getAddress.getHostAddress
+  val version            = host.getCassandraVersion
+  val dataCenter         = host.getDatacenter
+  val canonicalHostName  = host.getAddress.getCanonicalHostName
+  val rack               = host.getRack
+
   //TODO add opsCenter Info and warnings!
 
 }
@@ -152,9 +154,11 @@ case class ClusterInfo(metaData: Metadata, opsCenterClusterInfo: Option[OpsCente
   val dataCenter: SortedSet[String]  = metaData.getAllHosts.groupBy(h => h.getDatacenter).keys.to
   val keyspaces: SortedSet[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i,dataCenter) }).to
 
+
+
   //TODO - make nice table of HOST info
   //val hosts                          = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
-  val hosts                           = metaData.getAllHosts.map( h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getSocketAddress))))  )
+  val hosts                           = metaData.getAllHosts.map( h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getAddress.getHostAddress))))  )
   //
   //TODO add cluster checks summary  ie check DC names etc!
   //TODO implement compare keyspaces - one cluster to another

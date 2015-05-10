@@ -6,8 +6,9 @@ package domain
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
 
+
 object CassandraYaml {
-    def parseCassandraYaml (body: String) = {
+    def parseBody (body: String) = {
         implicit val formats = DefaultFormats
         parse(body).extract[CassandraYaml]
     }
@@ -19,7 +20,8 @@ case class CassandraYaml (authenticator                     : Option[String],
                           cluster_name                      : Option[String],
                          //..
                           concurrent_reads                  : Option[Int],
-                          concurrent_writes                 : Option[Int] ) {}
+                          concurrent_writes                 : Option[Int] ) {
+}
 
 
 case class Login (sessionid: String) {}
