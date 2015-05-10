@@ -3,10 +3,24 @@ package ganda
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
 import scala.collection.SortedSet
+import ganda._
+
+object ganda {
+  def combineChecks(acc: List[Check], checkable: List[Checkable] ): List[Check] =
+    acc ++ checkable.flatMap(_.checks)
+}
 
 case class Check (name: String, details: String, hasPassed: Boolean, severity: String )
 
-case class Column(columnMetadata: ColumnMetadata, keyType: String) {
+trait Checkable {
+  def checks: List[Check] =
+    combineChecks(myChecks, children)
+
+  protected def myChecks: List[Check]
+  protected def children: List[Checkable]
+}
+
+case class Column(columnMetadata: ColumnMetadata, keyType: String) extends Checkable {
   val keyspace_name = columnMetadata.getTable.getKeyspace
   val table_name    = columnMetadata.getTable.getName
   val column_name   = columnMetadata.getName
@@ -21,15 +35,16 @@ case class Column(columnMetadata: ColumnMetadata, keyType: String) {
   val index_name    = if (columnMetadata.getIndex != null) {columnMetadata.getIndex.getName} else {""}
 
 
-  val checks: List[Check] = {
+  val myChecks: List[Check] = {
     List(
       Check("Secondary Index exists", s"$index_name index on table $table_name.$column_name!", index_name == "", "warning" ),
       Check("ColumnName is non-lowercase", s"$table_name.$column_name is not lower case!", column_name.equals(column_name.toLowerCase), "warning" )
     )
   }
+  val children = List.empty
 }
 
-case class Table(tableMetadata: TableMetadata) {
+case class Table(tableMetadata: TableMetadata) extends Checkable {
 
   val keyspace_name                 = tableMetadata.getKeyspace.getName
   val table_name                    = tableMetadata.getName
@@ -64,22 +79,20 @@ case class Table(tableMetadata: TableMetadata) {
 
 
   //TODO extra table checks based on properties
-  val checks: List[Check] = {
-    val tableChecks = List(
+  val myChecks: List[Check] = List(
       Check("Single column table", s"$table_name only has one column!", columns.size != 1, "warning" ),
       Check("TableName is non-lowercase", s"$table_name is not lower case!", table_name.equals(table_name.toLowerCase), "warning" )
     )
 
-    //Add table and column checks
-    columns.foldLeft(tableChecks){(acc, col) => acc ++ col.checks}
-  }
+  val children = columns
+  
 }
 
 
 case class Link (from: Table, to: Table, on: String)
 
-//TODO nice solution for DC names!
-case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCnames: SortedSet[String]) extends Ordered[Keyspace] {
+
+case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCnames: SortedSet[String]) extends Checkable with Ordered[Keyspace] {
 
   def compare(that: Keyspace): Int = this.keyspace_name.toLowerCase compare that.keyspace_name.toLowerCase
 
@@ -106,8 +119,7 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCname
 
   val ignoreKeyspaces: Set[String] = Set("system_auth","system_traces","system","dse_system")
 
-  val checks: List[Check] = {
-    val keyspaceChecks = List(
+  val myChecks: List[Check] = List(
     //TODO ignore cassandraerrors and mutations otherwise appears to be used!!
     //TODO check DC names are valid
       Check("Keyspace is unused check" , s"No tables in keyspace: $keyspace_name!", tables.size > 0, "warning" ),
@@ -117,31 +129,41 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCname
     //TODO remove treeset from DC message!
       Check("Data Center names check",s"$keyspace_name has incorrect DC names: ${dataCenter}",dataCenter ++ validDCnames == validDCnames   , "warning" )
     )
-    tables.foldLeft(keyspaceChecks){(acc, tab) => acc ++ tab.checks }
-  }
+  val children = tables
 }
 
 //TODO add Cassandra node object
 //TODO ask about Sorted objkects etc
 
-case class ClusterInfo(metaData: Metadata ) {
+case class NodeHost (host: Host, opsCenterNode: Option[OpsCenterNode]) {
+  val address        = host.getAddress
+  val version        = host.getCassandraVersion
+  val dataCenter     = host.getDatacenter
+  val socketAddress  = host.getSocketAddress
+  //TODO add opsCenter Info and warnings!
+
+}
+
+
+
+case class ClusterInfo(metaData: Metadata, opsCenterClusterInfo: Option[OpsCenterClusterInfo] ) extends Checkable {
   val cluster_name                   = metaData.getClusterName
   val schemaAgreement                = metaData.checkSchemaAgreement()
   val dataCenter: SortedSet[String]  = metaData.getAllHosts.groupBy(h => h.getDatacenter).keys.to
   val keyspaces: SortedSet[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i,dataCenter) }).to
 
   //TODO - make nice table of HOST info
-  val hosts                     = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
+  //val hosts                          = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
+  val hosts                           = metaData.getAllHosts.map( h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getSocketAddress))))  )
   //
   //TODO add cluster checks summary  ie check DC names etc!
   //TODO implement compare keyspaces - one cluster to another
 
-  val checks: List[Check] = {
-    val clusterChecks = List(
+  val myChecks: List[Check] =  List(
       Check("Cluster agreement check", s"Cluster schema agreement issues!",schemaAgreement, "warning" )
     )
-    keyspaces.foldLeft(clusterChecks){(acc, col) => acc ++ col.checks}
-  }
+
+  val children = keyspaces.toList
 }
 
 case class AllClusters (clusterInfoList: List[ClusterInfo]) {
@@ -160,6 +182,15 @@ object ClusterInfo {
   def createClusterInfo(session: Session): AllClusters =  {
     val clusterRes = session.execute(new SimpleStatement("select * from cluster where hcpk='hcpk'"))
 
+    //TODO - FIX This to be external configuration
+    val host = "localhost:8888"
+    val uname = "admin"
+    val pword = "admin"
+    val opscenter = OpsCenter.createOpsCenter(host, uname, pword )
+
+
+
+    //per CLuster
     val clusterList=
       clusterRes.foldLeft(List[ClusterInfo]()) { (a, row) =>
 
@@ -176,7 +207,8 @@ object ClusterInfo {
           //withPort(port).
           build().
           connect()
-      val clusterInfo = List(ClusterInfo(clusSes.getCluster.getMetadata))
+      val clusterInfo = List(ClusterInfo( clusSes.getCluster.getMetadata,  opscenter.clusters.find(a => a.name.equals(cluster_name)))
+      )
       clusSes.close()
 
       a ++  clusterInfo

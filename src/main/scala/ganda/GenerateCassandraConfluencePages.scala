@@ -78,6 +78,16 @@ object GenerateCassandraConfluencePages {
   }
 
 
+
+//  <ac:structured-macro ac:name="include">
+//    <ac:parameter ac:name="">
+//      <ac:link>
+//        <a href={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${clusterInfo.cluster_name}"}>Overview</a>
+//      </ac:link>
+//    </ac:parameter>
+//  </ac:structured-macro>|
+
+
   def generateClusterInfoPage(project: String, clusterInfo: ClusterInfo): String= {
 
     //TODO add summary of cluster information
@@ -97,14 +107,33 @@ object GenerateCassandraConfluencePages {
       rows
     }
     val clusterWarnings = clusterInfo.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
-    val allHosts: String = clusterInfo.hosts.foldLeft(""){(a,h) => a + h + "\n" }
+  //  val allHosts: String = clusterInfo.hosts.foldLeft(""){(a,h) => a + h + "\n" }
+
+    //<p>{ Confluence.confluenceCodeBlock("All Hosts", allHosts ,"none")}</p>
 
     //The actual cluster page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
       <body>{CONFLUENCE_WARNING}<hr/>
         <h1>Cluster: {clusterInfo.cluster_name}</h1>
-        <p>{ Confluence.confluenceCodeBlock("All Hosts", allHosts ,"none")}</p>
         <p>{ Confluence.confluenceCodeBlock("Warnings", clusterWarnings ,"none")}</p>
+          <img src={s"http://graphite-dev.europe.intranet/render?from=-2hours&until=now&width=400&height=250&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.mean&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.max&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.p99&_uniq=0.8728725090622902"}/>
+        <h1>Host Information</h1>
+        <p>
+          <table>
+            <tbody><tr><th>Host Name</th><th>Data Center</th><th>C* Version</th><th>Socket Address</th><th>Extras</th></tr>
+              {scala.xml.Unparsed( clusterInfo.hosts.foldLeft("") { (at, host) => at +
+                                            <tr>
+                                              <td>{host.address}</td>
+                                              <td>{host.dataCenter}</td>
+                                              <td>{host.version}</td>
+                                              <td>{host.socketAddress}</td>
+                                              <td>{ Confluence.confluenceCodeBlock("Yaml", host.opsCenterNode.toString ,"none")}</td>
+                                            </tr>
+                                            })
+              }
+            </tbody>
+          </table>
+        </p>
         <h1>Keyspaces</h1>
         <p>
           <table>
@@ -115,6 +144,47 @@ object GenerateCassandraConfluencePages {
         </p>
       </body>.toString
   }
+
+
+//TODO based on OpsCenter INFO
+//  <table>
+//    <tbody><tr><th>Host Name</th><th>Version</th></tr>
+//      {scala.xml.Unparsed( clusterInfo.opsCenterClusterInfo.headOption match {
+//      case Some(n) =>  n.nodes.foldLeft("") { (at, node) => at +
+//        <tr>
+//          <td>{node.name}</td>
+//          <td>{node.cassandra.concurrent_writes}</td>
+//        </tr>
+//      }
+//      case _ => ""
+//    })
+//      }
+//    </tbody>
+//  </table>
+
+
+
+//  <ac:structured-macro ac:name="html-include">
+//    <ac:parameter ac:name="url">
+//      <ri:url ri:value={s"http://graphite-dev.europe.intranet/render?from=-2hours&until=now&width=400&height=250&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.mean&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.max&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.p99&_uniq=0.8728725090622902"}/>
+//    </ac:parameter>
+//  </ac:structured-macro>
+
+
+
+  //TODO - make graphite checker!!!  Seems to be rather messy
+  //TODO show info in governance schema
+  //this is using graphana!
+  def clusterGraphite(cluster_name: String) = <a href={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${cluster_name}"}>Overview</a>
+
+//  Could not access the content at the URL because it is not from an allowed source.
+//  http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=LLDS_1_DEV
+//  You may contact your site administrator and request that this URL be added to the list of allowed sources.
+//    <ac:structured-macro ac:name="html-include">
+//      <ac:parameter ac:name="url">
+//        <ri:url ri:value={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${clusterInfo.cluster_name}"}/>
+//      </ac:parameter>
+//    </ac:structured-macro>
 
 
   def generateClusterSummaryPage(allClusters: AllClusters, project: String): String=  {
@@ -128,10 +198,11 @@ object GenerateCassandraConfluencePages {
       <h1>Cluster Summary</h1>
       <p>
         <table>
-          <tbody><tr><th>Cluster Name</th><th>Warnings</th><th>Last Checked</th></tr>
+          <tbody><tr><th>Cluster Name</th><th>Metrics</th><th>Warnings</th><th>Last Checked</th></tr>
             {scala.xml.Unparsed( allClusters.clusterInfoList.foldLeft("") { (at, clus) => at +
             <tr>
               <td><a href={s"/display/$project/${clus.cluster_name.replace(" ","+")}"}>{clus.cluster_name}</a></td>
+              <td>{clusterGraphite(clus.cluster_name)}</td>
               <td>{ Confluence.confluenceCodeBlock("Warnings", clus.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" } ,"none")}</td>
               <td>{ Calendar.getInstance.getTime} </td>
             </tr>
@@ -167,8 +238,8 @@ object GenerateCassandraConfluencePages {
     </body>.toString
   }
 
-
   def generateAllConfluencePages (project: String, mainPageName: String, session : Session, confluenceUser: String, confluencePassword: String): Unit = {
+
     val allClusters = ClusterInfo.createClusterInfo(session)
     val token: Token = Token.getInstance
     token.initialise(confluenceUser, confluencePassword)
