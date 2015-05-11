@@ -127,44 +127,41 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCname
       Check("ModelMutation table check",s"$keyspace_name has no ModelMutation table.", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("modelmutation")) != 0 , "warning" ),
       //DC checks a + b = a  so nothing added
     //TODO remove treeset from DC message!
-      Check("Data Center names check",s"$keyspace_name has incorrect DC names: ${dataCenter}",dataCenter ++ validDCnames == validDCnames   , "warning" )
+      Check("Data Center names check",s"$keyspace_name has incorrect DC names: ${dataCenter.foldLeft(""){(a,w) => a + " '" + w + "'" }}",validDCnames ++ dataCenter == validDCnames   , "error" )
     )
   val children = tables
 }
 
-//TODO add Cassandra node object
-//TODO ask about Sorted objkects etc
 
-case class NodeHost (host: Host, opsCenterNode: Option[OpsCenterNode]) {
+
+case class NodeHost (host: Host, opsCenterNode: Option[OpsCenterNode]) extends Ordered[NodeHost] {
+
+  def compare(that: NodeHost): Int = this.dataCenter.concat(this.canonicalHostName) compare that.dataCenter.concat(that.canonicalHostName)
+
   val ipAddress          = host.getAddress.getHostAddress
   val version            = host.getCassandraVersion
   val dataCenter         = host.getDatacenter
   val canonicalHostName  = host.getAddress.getCanonicalHostName
   val rack               = host.getRack
-
   //TODO add opsCenter Info and warnings!
 
 }
 
 
 
-case class ClusterInfo(metaData: Metadata, opsCenterClusterInfo: Option[OpsCenterClusterInfo] ) extends Checkable {
+case class ClusterInfo(metaData: Metadata, opsCenterClusterInfo: Option[OpsCenterClusterInfo],
+                       graphite_host: String, graphana_host: String ) extends Checkable {
   val cluster_name                   = metaData.getClusterName
   val schemaAgreement                = metaData.checkSchemaAgreement()
   val dataCenter: SortedSet[String]  = metaData.getAllHosts.groupBy(h => h.getDatacenter).keys.to
   val keyspaces: SortedSet[Keyspace] = metaData.getKeyspaces.map( i => { new Keyspace(i,dataCenter) }).to
-
-
-
-  //TODO - make nice table of HOST info
-  //val hosts                          = metaData.getAllHosts.map( h => h.getAddress.getHostName + " C* version " + h.getCassandraVersion)
-  val hosts                           = metaData.getAllHosts.map( h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getAddress.getHostAddress))))  )
+  val hosts                          = metaData.getAllHosts.map( h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getAddress.getHostAddress))))  )
   //
   //TODO add cluster checks summary  ie check DC names etc!
   //TODO implement compare keyspaces - one cluster to another
 
   val myChecks: List[Check] =  List(
-      Check("Cluster agreement check", s"Cluster schema agreement issues!",schemaAgreement, "warning" )
+      Check("Cluster agreement check", s"$cluster_name schema agreement issues!",schemaAgreement, "error" )
     )
 
   val children = keyspaces.toList
@@ -183,40 +180,45 @@ case class AllClusters (clusterInfoList: List[ClusterInfo]) {
 
 object ClusterInfo {
 
-  def createClusterInfo(session: Session): AllClusters =  {
-    val clusterRes = session.execute(new SimpleStatement("select * from cluster where hcpk='hcpk'"))
-
-    //TODO - FIX This to be external configuration
-    val host = "localhost:8888"
-    val uname = "admin"
-    val pword = "admin"
-    val opscenter = OpsCenter.createOpsCenter(host, uname, pword )
-
-
+  def createClusterInfo(session: Session, group : String): AllClusters =  {
+    val clusterRes = session.execute(new SimpleStatement(s"select * from cluster where group='$group'"))
 
     //per CLuster
     val clusterList=
       clusterRes.foldLeft(List[ClusterInfo]()) { (a, row) =>
+        val cluster_name = row.getString("cluster_name")
 
-      val cluster_name = row.getString("cluster_name")
-      val uname = row.getString("uname")
-      val pword = row.getString("pword")
-      val hosts = row.getString("hosts").split(",")
-      //TODO add error handling and make reactive!
-      lazy val clusSes: Session =
-        Cluster.builder().
-          addContactPoints(hosts: _*).
-          withCompression(ProtocolOptions.Compression.SNAPPY).
-          withCredentials(uname, pword).
-          //withPort(port).
-          build().
-          connect()
-      val clusterInfo = List(ClusterInfo( clusSes.getCluster.getMetadata,  opscenter.clusters.find(a => a.name.equals(cluster_name)))
-      )
-      clusSes.close()
+        //get OpsCenter details
+        val ops_uname = row.getString("ops_uname")
+        val ops_pword = row.getString("ops_pword")
+        val ops_hosts = row.getString("opscenter")
+        val opsCenterClusterInfo = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, cluster_name )
 
-      a ++  clusterInfo
-    }
+        //cluster config
+        val uname = row.getString("uname")
+        val pword = row.getString("pword")
+        val hosts = row.getString("hosts").split(",")
+
+        //graphite
+        val graphite_host = row.getString("graphite")
+        val graphana_host = row.getString("graphana")
+
+
+        //TODO add error handling and make reactive!
+        lazy val clusSes: Session =
+          Cluster.builder().
+            addContactPoints(hosts: _*).
+            withCompression(ProtocolOptions.Compression.SNAPPY).
+            withCredentials(uname, pword).
+            //withPort(port).
+            build().
+            connect()
+        val clusterInfo = List(ClusterInfo( clusSes.getCluster.getMetadata,  opsCenterClusterInfo, graphite_host, graphana_host)
+        )
+        clusSes.close()
+
+        a ++  clusterInfo
+      }
     AllClusters(clusterList)
   }
 }

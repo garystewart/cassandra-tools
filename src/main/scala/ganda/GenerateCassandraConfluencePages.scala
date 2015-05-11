@@ -10,8 +10,7 @@ import scala.collection.SortedSet
 
 object GenerateCassandraConfluencePages {
 
-  private def CONFLUENCE_HEADER (intro: String) =
-    <ac:structured-macro ac:name="section">
+  private def CONFLUENCE_HEADER (intro: String) = <ac:structured-macro ac:name="section">
       <ac:rich-text-body>
         <ac:structured-macro ac:name="column">
           <ac:parameter ac:name="width">50%</ac:parameter> <ac:rich-text-body>
@@ -37,8 +36,6 @@ object GenerateCassandraConfluencePages {
       </ac:structured-macro>
       </ac:rich-text-body>
     </ac:structured-macro>
-
-
 
   def generateKeyspacePage(keyspace: Keyspace): String= {
 
@@ -84,12 +81,14 @@ object GenerateCassandraConfluencePages {
       firstRow + restRows
     }
 
-    val keyspaceWarnings = keyspace.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
+    val keyspaceWarnings = keyspace.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning")).foldLeft(""){(a,w) => a + w.details + "\n" }
+    val keyspaceErrors = keyspace.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error")).foldLeft(""){(a,w) => a + w.details + "\n" }
     //The actual keyspace page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
     <body>{CONFLUENCE_HEADER("This section summarises all the keyspace information.")}<hr/>
       <h1>Keyspace: {keyspace.keyspace_name}</h1>
-      <p>{ Confluence.confluenceCodeBlock("Warnings", keyspaceWarnings ,"none")}</p>
+      <p>{ Confluence.confluenceCodeBlock("Errors", keyspaceErrors ,"none")}
+        { Confluence.confluenceCodeBlock("Warnings", keyspaceWarnings ,"none")}</p>
       <p>{ Confluence.confluenceCodeBlock("Schema",keyspace.schemaScript,"none")}</p>
       <h1>Tables</h1>
       <p>
@@ -121,7 +120,8 @@ object GenerateCassandraConfluencePages {
         }
       rows
     }
-    val clusterWarnings = clusterInfo.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
+    val clusterWarnings = clusterInfo.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning")).foldLeft(""){(a,w) => a + w.details + "\n" }
+    val clusterErrors = clusterInfo.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error")).foldLeft(""){(a,w) => a + w.details + "\n" }
 
     import org.json4s.jackson.Serialization.write
     import org.json4s._
@@ -132,19 +132,20 @@ object GenerateCassandraConfluencePages {
     //need <body> tag otherwise ArrayBuilder is shown on confluence
       <body>{CONFLUENCE_HEADER("This section summarises all the cluster information.")}<hr/>
         <h1>Cluster: {clusterInfo.cluster_name}</h1>
-        <p>{ Confluence.confluenceCodeBlock("Warnings", clusterWarnings ,"none")}</p>
-          <img src={s"http://graphite-dev.europe.intranet/render?from=-2hours&until=now&width=400&height=250&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.mean&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.max&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.p99&_uniq=0.8728725090622902"}/>
+        <p>{ Confluence.confluenceCodeBlock("Errors", clusterErrors ,"none")}
+          { Confluence.confluenceCodeBlock("Warnings", clusterWarnings ,"none")}</p>
+          <img src={s"http://${clusterInfo.graphite_host}/render?from=-2hours&until=now&width=400&height=250&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.mean&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.max&target=LLDS.Cassandra.${clusterInfo.cluster_name}.requests.p99&_uniq=0.8728725090622902"}/>
         <h1>Host Information</h1>
         <p>
           <table>
             <tbody><tr><th>Data Center</th><th>Host Name</th><th>IP Address</th><th>C* Version</th><th>Extras</th></tr>
-              {scala.xml.Unparsed( clusterInfo.hosts.foldLeft("") { (at, host) => at +
+              {scala.xml.Unparsed( clusterInfo.hosts.to[SortedSet].foldLeft("") { (at, host) => at +
                                             <tr>
                                               <td>{host.dataCenter}</td>
                                               <td>{host.canonicalHostName}</td>
                                               <td>{host.ipAddress}</td>
                                               <td>{host.version}</td>
-                                              <td>{ //val yaml
+                                              <td>{
                                                 val yaml  =  try { pretty(parse( write(host.opsCenterNode)))}
                                                  catch {case e: Exception => ""}
                                                 Confluence.confluenceCodeBlock("Yaml",yaml  ,"none")}</td>
@@ -167,8 +168,9 @@ object GenerateCassandraConfluencePages {
 
   //TODO - make graphite checker!!!  Seems to be rather messy
   //TODO show info in governance schema
-  //this is using graphana!
-  def clusterGraphite(cluster_name: String) = <a href={s"http://bl00053.nl.europe.intranet:3000/dashboard/db/cluster-health-per-cluster?Cluster=${cluster_name}"}>Overview</a>
+
+   //this is using graphana!
+   def clusterGraphite(cluster_name: String,graphana_host: String ) = <a href={s"http://${graphana_host}/dashboard/db/cluster-health-per-cluster?Cluster=${cluster_name}"}>Overview</a>
 
   def generateClusterSummaryPage(allClusters: AllClusters, project: String): String=  {
 
@@ -181,12 +183,19 @@ object GenerateCassandraConfluencePages {
       <h1>Cluster Summary</h1>
       <p>
         <table>
-          <tbody><tr><th>Cluster Name</th><th>Metrics</th><th>Warnings</th><th>Last Checked</th></tr>
-            {scala.xml.Unparsed( allClusters.clusterInfoList.foldLeft("") { (at, clus) => at +
+          <tbody><tr><th>Cluster Name</th><th>Metrics</th><th>Total Errors</th><th>Total Warnings</th><th>Extras</th><th>Last Checked</th></tr>
+            {scala.xml.Unparsed( allClusters.clusterInfoList.foldLeft("") { (at, clus) =>
+            val warnings = clus.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning"))
+            val errors = clus.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error"))
+            at +
             <tr>
               <td><a href={s"/display/$project/${clus.cluster_name.replace(" ","+")}"}>{clus.cluster_name}</a></td>
-              <td>{clusterGraphite(clus.cluster_name)}</td>
-              <td>{ Confluence.confluenceCodeBlock("Warnings", clus.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" } ,"none")}</td>
+              <td>{clusterGraphite(clus.cluster_name, clus.graphana_host)}</td>
+              <td>{errors.size}</td>
+              <td>{warnings.size}</td>
+              <td>{ Confluence.confluenceCodeBlock("Error", errors.foldLeft(""){(a,w) => a + w.details + "\n" } ,"none")}
+                { Confluence.confluenceCodeBlock("Warnings", warnings.foldLeft(""){(a,w) => a + w.details + "\n" } ,"none")}
+              </td>
               <td>{ Calendar.getInstance.getTime} </td>
             </tr>
             } )
@@ -221,14 +230,20 @@ object GenerateCassandraConfluencePages {
     </body>.toString
   }
 
-  def generateAllConfluencePages (project: String, mainPageName: String, session : Session, confluenceUser: String, confluencePassword: String): Unit = {
 
-    val allClusters = ClusterInfo.createClusterInfo(session)
+
+  def generateAllConfluencePages (project: String, mainPageName: String, session : Session,
+                                  confluenceUser: String, confluencePassword: String, group: String): Unit = {
+
+    //login into confluence
+    val allClusters = ClusterInfo.createClusterInfo(session, group)
     val token: Token = Token.getInstance
     token.initialise(confluenceUser, confluencePassword)
     val page: Page = new Page
+
     //Find the main Clusters page
     val parentPage: RemotePage = page.read(project, mainPageName)
+
     //Always update the Cluster page
     parentPage.setContent( s"<body>${generateClusterSummaryPage(allClusters, project)}</body>")
     page.store(parentPage)
@@ -274,12 +289,14 @@ object GenerateCassandraConfluencePages {
                 page.remove(kPage.getId)
               }
           }
-        //Delete cluster page if not exists
-        if (!listClusterName.contains(cPage.getTitle))
-        {
-          println (s"DELETING page: ${cPage.getTitle}")
-          page.remove(cPage.getId)
-        }
+
+//TODO - REMOVED for now - need to rethink if this is handy
+//        //Delete cluster page if not exists
+//        if (!listClusterName.contains(cPage.getTitle))
+//        {
+//          println (s"DELETING page: ${cPage.getTitle}")
+//          page.remove(cPage.getId)
+//        }
       }
   }
 }
