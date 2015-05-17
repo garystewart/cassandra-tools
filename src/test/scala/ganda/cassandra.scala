@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 import com.datastax.driver.core.{ProtocolOptions, Session, Cluster}
 //import scala.io.Source

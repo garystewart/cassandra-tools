@@ -1,7 +1,7 @@
-package ganda
+package eu.ganda
 
 import scalaj.http._
-import _root_.domain.{Nodes, Login, CassandraYaml}
+import eu.ganda.domain.{Nodes, Login, CassandraYaml}
 
 case class OpsCenterNode (name: String, cassandra: CassandraYaml )
 case class OpsCenterClusterInfo (login: Login, name: String, nodes: List[OpsCenterNode])
@@ -33,25 +33,43 @@ object OpsCenter {
   }
 
 
+
+
+
+  def getTableSize(login: Login, host: String, uname: String, pword: String, clusterName: String, keyspaceName: String) = {
+
+    val table_info = Http(s"http://$host/$clusterName/cluster-metrics/all/$keyspaceName/Users/cf-live-disk-used")
+      .header("opscenter-session", login.sessionid).header("Accept", "text/json")
+      .param("function","max").param("start",(System.currentTimeMillis()-10000000).toString).param("end",System.currentTimeMillis().toString)//.param("step","60")
+      .timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
+    println(table_info)
+  }
+
+
   //TODO check for more ideas - http://docs.datastax.com/en/opscenter/5.1/api/docs/index.html#
   def createOpsCenterClusterInfo (host: String, uname: String, pword: String, clusterName: String): Option[OpsCenterClusterInfo] = {
-  Option {
-    //login to OpsCenter and get session id
-    val resultLogin = Http(s"http://$host/login").param("username",uname).param("password",pword).timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
-    val login = Login.parseLogin(resultLogin)
+    try {
+      //login to OpsCenter and get session id
+      val resultLogin = Http(s"http://$host/login").param("username", uname).param("password", pword).timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
+      val login = Login.parseLogin(resultLogin)
 
 
       val nodesRes = Http(s"http://$host/$clusterName/nodes").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
       //TODO - val nodes = Nodes.parseBody(nodesRes)
-      val listNodeIP= getNodeNames (host, login, clusterName)
-      println (s"$clusterName found nodes: $listNodeIP")
+      val listNodeIP = getNodeNames(host, login, clusterName)
+      println(s"$clusterName found nodes: $listNodeIP")
       //per node
       val listNodes = listNodeIP.map(node_ip => {
         val nodeIPres = Http(s"http://$host/$clusterName/nodeconf/$node_ip").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
-        new OpsCenterNode (node_ip, CassandraYaml.parseBody(nodeIPres))
+        new OpsCenterNode(node_ip, CassandraYaml.parseBody(nodeIPres))
       })
-      new OpsCenterClusterInfo(login, clusterName, listNodes)
-     }
+      Some(new OpsCenterClusterInfo(login, clusterName, listNodes))
+    }
+    catch {case e: Exception => {
+      println (s"$e")
+      println (s"Failed to get OpsCenterInfo for $clusterName")
+      None
+    }}
   }
 }
 

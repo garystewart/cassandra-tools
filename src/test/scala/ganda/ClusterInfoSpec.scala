@@ -1,9 +1,12 @@
-package ganda
+package eu.ganda
 
-import akka.actor.ActorSystem
+import akka.actor.{Props, ActorSystem}
 import akka.testkit.{ImplicitSender, DefaultTimeout, TestKit}
+import eu.ganda.actor.Controller.{Done, GetClusterGroup}
 import nl.ing.confluence.rpc.soap.actions.Token
 import org.scalatest._
+import eu.ganda.actor._
+import scala.concurrent.duration._
 
 class ClusterInfoSpec  extends TestKit(ActorSystem("ClusterInfoSpec"))
 //with DefaultTimeout with ImplicitSender
@@ -19,7 +22,7 @@ with TestCassandraCluster {
 
   it  ("Pretty Print ClusterInfo to Confluence") {
     GenerateCassandraConfluencePages.generateAllConfluencePages ("","", session,"","", "")
-    
+
 
   }
 
@@ -30,6 +33,7 @@ with TestCassandraCluster {
     import nl.ing.confluence.rpc.soap.beans.RemotePage
     val token: Token = Token.getInstance
     token.initialise("", "")
+
 
     val page: Page = new Page
     //Find the main Clusters page
@@ -75,9 +79,19 @@ with TestCassandraCluster {
       val pword = "admin"
 
       val opscenter = OpsCenter.createOpsCenterClusterInfo(host, uname, pword, "LLDS_1_DEV" )
+
+      OpsCenter.getTableSize(opscenter.head.login, host, uname, pword, "LLDS_1_DEV","party")
    }
 
 
+  it("Actor simplke test") {
+    val controller = system.actorOf(Props[Controller])
+    controller ! GetClusterGroup (testActor, "LLDS_1", session)
+
+    expectMsg(20 seconds, Done)
+
+    //TODO shutdown system
+  }
 
   it ("test json parse") {
     testSpec.testS

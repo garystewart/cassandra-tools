@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 object PrettyPrint {
 

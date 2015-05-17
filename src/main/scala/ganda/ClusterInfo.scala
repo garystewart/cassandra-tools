@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 import com.datastax.driver.core._
 import scala.collection.JavaConversions._
@@ -124,7 +124,7 @@ case class Keyspace (keyspaceMetaData: KeyspaceMetadata, private val validDCname
     //TODO check DC names are valid
       Check("Keyspace is unused check" , s"No tables in keyspace: $keyspace_name!", tables.size > 0, "warning" ),
       Check("CassandraErrors table check",s"$keyspace_name has no CassandraErrors table.", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("cassandraerrors")) != 0 , "warning" ),
-      Check("ModelMutation table check",s"$keyspace_name has no ModelMutation table.", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("modelmutation")) != 0 , "warning" ),
+      Check("ModelMutation table check",s"$keyspace_name has no ModelMutation table.", ignoreKeyspaces.contains(keyspace_name) || tables.count(t=> t.table_name.equals("modelmutation")) != 0 , "info" ),
       //DC checks a + b = a  so nothing added
     //TODO remove treeset from DC message!
       Check("Data Center names check",s"$keyspace_name has incorrect DC names: ${dataCenter.foldLeft(""){(a,w) => a + " '" + w + "'" }}",validDCnames ++ dataCenter == validDCnames   , "error" )
@@ -149,8 +149,11 @@ case class NodeHost (host: Host, opsCenterNode: Option[OpsCenterNode]) extends O
 
 
 
-case class ClusterInfo(metaData: Metadata, opsCenterClusterInfo: Option[OpsCenterClusterInfo],
-                       graphite_host: String, graphana_host: String ) extends Checkable {
+case class ClusterInfo(metaData: Metadata,
+                       opsCenterClusterInfo: Option[OpsCenterClusterInfo],
+                       graphite_host: String,
+                       graphana_host: String
+                       ) extends Checkable {
   val cluster_name                   = metaData.getClusterName
   val schemaAgreement                = metaData.checkSchemaAgreement()
   val dataCenter: SortedSet[String]  = metaData.getAllHosts.groupBy(h => h.getDatacenter).keys.to
@@ -178,6 +181,8 @@ case class AllClusters (clusterInfoList: List[ClusterInfo]) {
   }
 }
 
+
+//TODO most of this can be removed due to Actor setup :-)
 object ClusterInfo {
 
   def createClusterInfo(session: Session, group : String): AllClusters =  {
@@ -187,12 +192,15 @@ object ClusterInfo {
     val clusterList=
       clusterRes.foldLeft(List[ClusterInfo]()) { (a, row) =>
         val cluster_name = row.getString("cluster_name")
+        println (s"$cluster_name - starting")
 
         //get OpsCenter details
         val ops_uname = row.getString("ops_uname")
         val ops_pword = row.getString("ops_pword")
         val ops_hosts = row.getString("opscenter")
+
         val opsCenterClusterInfo = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, cluster_name )
+
 
         //cluster config
         val uname = row.getString("uname")
@@ -213,10 +221,9 @@ object ClusterInfo {
             //withPort(port).
             build().
             connect()
-        val clusterInfo = List(ClusterInfo( clusSes.getCluster.getMetadata,  opsCenterClusterInfo, graphite_host, graphana_host)
-        )
+        val clusterInfo = List(ClusterInfo( clusSes.getCluster.getMetadata,  opsCenterClusterInfo, graphite_host, graphana_host))
         clusSes.close()
-
+        println (s"$cluster_name - finished")
         a ++  clusterInfo
       }
     AllClusters(clusterList)

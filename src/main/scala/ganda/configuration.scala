@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 import com.datastax.driver.core.{Session, ProtocolOptions, Cluster}
 import akka.actor.ActorSystem

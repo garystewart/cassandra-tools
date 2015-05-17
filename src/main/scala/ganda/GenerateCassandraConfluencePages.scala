@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 import java.util.Calendar
 
@@ -233,10 +233,10 @@ object GenerateCassandraConfluencePages {
 
 
   def generateAllConfluencePages (project: String, mainPageName: String, session : Session,
-                                  confluenceUser: String, confluencePassword: String, group: String): Unit = {
+                                  confluenceUser: String, confluencePassword: String): Unit = {
 
     //login into confluence
-    val allClusters = ClusterInfo.createClusterInfo(session, group)
+    val allClusters = ClusterInfo.createClusterInfo(session, mainPageName)
     val token: Token = Token.getInstance
     token.initialise(confluenceUser, confluencePassword)
     val page: Page = new Page
@@ -282,7 +282,7 @@ object GenerateCassandraConfluencePages {
           yield {
             //SEE CREATE if you change this!!!!!!
             //Delete keyspace page if not exists
-            if (allClusters.clusterInfoList.filter(cList => cList.cluster_name.equals(cPage.getTitle)).
+            if (allClusters.clusterInfoList.filter(cList => cList.cluster_name.toUpperCase.equals(cPage.getTitle)).
               flatMap(cl => cl.keyspaces).count(k => k.keyspace_name.toUpperCase.equals(substringAfter(kPage.getTitle," - "))) == 0 )
               {
                 println (s"DELETING page: ${kPage.getTitle}")

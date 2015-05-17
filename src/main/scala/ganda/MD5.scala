@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 /* MD5 object and hash def to prevent updating the page if there are no changes
  */

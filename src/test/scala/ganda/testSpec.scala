@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 /**
  * Created by M06F525 on 10/05/2015.

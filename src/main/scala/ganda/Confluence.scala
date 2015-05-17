@@ -1,4 +1,4 @@
-package ganda
+package eu.ganda
 
 import nl.ing.confluence.rpc.soap.actions.Page
 import nl.ing.confluence.rpc.soap.beans.RemotePage

@@ -1,4 +1,4 @@
-package domain
+package eu.ganda.domain
 
 /*   Contains all the structure of objects from OpsCenter
 
