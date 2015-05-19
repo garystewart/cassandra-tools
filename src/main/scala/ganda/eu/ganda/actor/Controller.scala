@@ -3,7 +3,7 @@ package eu.ganda.actor
 import akka.actor.Actor.Receive
 import akka.actor.{Props, ActorRef, ActorLogging, Actor}
 import com.datastax.driver.core.{ProtocolOptions, Cluster, Session, SimpleStatement}
-import eu.ganda.{ClusterInfo, OpsCenter}
+import eu.ganda.{AllClusters, ClusterInfo, OpsCenter}
 import eu.ganda.actor.ClusterInfoActor.GetClusterInfo
 
 
@@ -49,7 +49,10 @@ class Controller extends Actor with ActorLogging  {
         val clusterInfo = context.actorOf(Props[ClusterInfoActor])
         counter += 1
 
-        clusterInfo !  GetClusterInfo (requester, clusterGroup, cluster_name, hosts, uname, pword, graphite_host, graphana_host  )
+        clusterInfo !  GetClusterInfo ( requester, clusterGroup, cluster_name,
+          hosts, uname, pword,
+          graphite_host, graphana_host,
+          ops_hosts,ops_uname, ops_pword )
 
       }
 
@@ -61,7 +64,9 @@ class Controller extends Actor with ActorLogging  {
       if (counter == 0 ) {
         //TODO - update confluence!!!
         log.info(s"Ready to update confluence - Total:  ${clusterInfoList.size}")
-        requester ! Done
+        val allClusters = AllClusters(clusterInfoList)
+        requester ! Done (allClusters)
+        context.stop(self)
       }
     }
   }
@@ -69,7 +74,7 @@ class Controller extends Actor with ActorLogging  {
 
 object Controller {
   case class GetClusterGroup (requester: ActorRef, clusterGroup: String, session: Session)
-  case object Done
+  case class  Done (allClusters: AllClusters)
 }
 
 
@@ -87,11 +92,12 @@ class ClusterInfoActor extends Actor with ActorLogging  {
   import eu.ganda.actor.ClusterInfoActor.ClusterInfoDone
 
   override def receive: Receive = {
-    case GetClusterInfo(requester,clusterGroup, clusterName, hosts, uname, pword, graphite_host, graphana_host) => {
+    case GetClusterInfo(requester,clusterGroup, clusterName, hosts, uname, pword, graphite_host, graphana_host,ops_hosts, ops_uname, ops_pword ) => {
       log.info(s"GetClusterInfo - message received")
       log.info(s"GetClusterInfo - processing $clusterName")
-      //TODO get OpsCenter Info
-      //val opsCenterClusterInfo = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, cluster_name )
+
+      //TODO get OpsCenter Info via Actor!
+      val opsCenterClusterInfo = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, clusterName )
 
       lazy val clusSes: Session =
         Cluster.builder().
@@ -103,7 +109,7 @@ class ClusterInfoActor extends Actor with ActorLogging  {
           connect()
 
       //TODO add ops Center Info!!!!! via messages!!!!!
-      val clusterInfo = ClusterInfo(clusSes.getCluster.getMetadata,  None, graphite_host, graphana_host)
+      val clusterInfo = ClusterInfo(clusSes.getCluster.getMetadata,  opsCenterClusterInfo, graphite_host, graphana_host)
       clusSes.close()
 
       sender ! ClusterInfoDone(requester, clusterInfo)
@@ -119,7 +125,8 @@ class ClusterInfoActor extends Actor with ActorLogging  {
 object ClusterInfoActor {
   case class GetClusterInfo (requester: ActorRef, clusterGroup: String, clusterName: String,
                              hosts: List[String], uname: String, pword: String,
-                             graphite_host: String,graphana_host: String )
+                             graphite_host: String,graphana_host: String,
+                             ops_hosts: String, ops_uname: String, ops_pword: String)
   case class ClusterInfoDone (requester: ActorRef, clusterInfo: ClusterInfo)
 }
 

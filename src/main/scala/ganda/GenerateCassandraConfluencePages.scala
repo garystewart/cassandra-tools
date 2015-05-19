@@ -299,4 +299,76 @@ object GenerateCassandraConfluencePages {
 //        }
       }
   }
+
+
+  def generateAllConfluencePages2 (project: String, mainPageName: String,
+                                  confluenceUser: String, confluencePassword: String,
+                                   allClusters: AllClusters): Unit = {
+
+    //login into confluence
+    //val allClusters = ClusterInfo.createClusterInfo(session, mainPageName)
+    val token: Token = Token.getInstance
+    token.initialise(confluenceUser, confluencePassword)
+    val page: Page = new Page
+
+    //Find the main Clusters page
+    val parentPage: RemotePage = page.read(project, mainPageName)
+
+    //Always update the Cluster page
+    parentPage.setContent( s"<body>${generateClusterSummaryPage(allClusters, project)}</body>")
+    page.store(parentPage)
+
+    val listKeyspace = allClusters.clusterInfoList.flatMap(_.keyspaces).map(_.keyspace_name).toSet
+    val listClusterName = allClusters.clusterInfoList.map(_.cluster_name).toSet
+
+    //Per ClusterInfo - create page
+    for(cl <- allClusters.clusterInfoList)
+      yield {
+        val clusterPageName = cl.cluster_name.toUpperCase
+        //create the specific summary cluster page
+        Confluence.confluenceCreatePage (project,clusterPageName, generateClusterInfoPage(project, cl), page, parentPage )
+        val clusterParentPage: RemotePage = page.read(project,clusterPageName)
+
+        //Per keyspace create pages
+        for(k <- cl.keyspaces)
+          yield {
+            val content: String = generateKeyspacePage(k)
+            //SEE DELETE below if you change this!!!!!!
+            val keyPageName =  cl.cluster_name.toUpperCase + " - " + k.keyspace_name.toUpperCase
+            Confluence.confluenceCreatePage (project,keyPageName, content, page, clusterParentPage )
+          }
+      }
+
+    //clean up pages no longer needed - ie keyspace deleted
+    //TODO add confluence package!
+    val clusterPages =  token.getService.getChildren(token.getToken, parentPage.getId)
+    //clusterPages.foreach(p => println (p.getTitle))
+    def substringAfter(s:String,k:String) = { s.indexOf(k) match { case -1 => ""; case i => s.substring(i+k.length)  } }
+    //start bottom up
+    for(cPage <- clusterPages)
+      yield {
+        val keyspacePages =  token.getService.getChildren(token.getToken, cPage.getId)
+        for(kPage <- keyspacePages)
+          yield {
+            //SEE CREATE if you change this!!!!!!
+            //Delete keyspace page if not exists
+            if (allClusters.clusterInfoList.filter(cList => cList.cluster_name.toUpperCase.equals(cPage.getTitle)).
+              flatMap(cl => cl.keyspaces).count(k => k.keyspace_name.toUpperCase.equals(substringAfter(kPage.getTitle," - "))) == 0 )
+            {
+              println (s"DELETING page: ${kPage.getTitle}")
+              page.remove(kPage.getId)
+            }
+          }
+
+        //TODO - REMOVED for now - need to rethink if this is handy
+        //        //Delete cluster page if not exists
+        //        if (!listClusterName.contains(cPage.getTitle))
+        //        {
+        //          println (s"DELETING page: ${cPage.getTitle}")
+        //          page.remove(cPage.getId)
+        //        }
+      }
+  }
+
+
 }
