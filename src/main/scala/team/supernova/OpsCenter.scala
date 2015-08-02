@@ -3,7 +3,6 @@ package team.supernova
 import team.supernova.domain.{CassandraYaml, Login}
 
 import scalaj.http._
-import eu.ganda.domain.Nodes
 
 case class OpsCenterNode (name: String, cassandra: CassandraYaml )
 case class OpsCenterClusterInfo (login: Login, name: String, nodes: List[OpsCenterNode])

@@ -119,10 +119,7 @@ case class KeyspaceCluster (keyspace: String, clusterName: String)
   }
 
 
-  def generateList (confluenceUser: String, confluencePass: String) : Unit = {
-    //logon to confluence
-    val token: Token = Token.getInstance
-    token.initialise(confluenceUser, confluencePass)
+  def generateList (token: Token) : Unit = {
 
     //find all keyspaces
     val keyspaceInfoList = getKeyspaces (token)
@@ -132,10 +129,6 @@ case class KeyspaceCluster (keyspace: String, clusterName: String)
     //println (clusterKeyspaceList)
 
     getKeyspacesInfoFromManualPage(token)
-
-    println("done")
-
+    println("---- FINISHED ---")
   }
-
-
 }

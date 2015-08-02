@@ -233,12 +233,10 @@ object GenerateCassandraConfluencePages {
 
 
   def generateAllConfluencePages (project: String, mainPageName: String, session : Session,
-                                  confluenceUser: String, confluencePassword: String, deletePages: Boolean): Unit = {
+                                  token: Token, deletePages: Boolean): Unit = {
 
     //login into confluence
     val allClusters = ClusterInfo.createClusterInfo(session, mainPageName)
-    val token: Token = Token.getInstance
-    token.initialise(confluenceUser, confluencePassword)
     val page: Page = new Page
 
     //Find the main Clusters page
