@@ -1,4 +1,4 @@
-package eu.ganda
+package team.supernova
 
 import com.datastax.driver.core._
 import com.datastax.driver.core.policies.ConstantSpeculativeExecutionPolicy

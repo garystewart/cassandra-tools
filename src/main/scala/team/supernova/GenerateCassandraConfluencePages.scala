@@ -1,4 +1,4 @@
-package eu.ganda
+package team.supernova
 
 import java.util.Calendar
 

@@ -1,4 +1,4 @@
-package eu.ganda
+package team.supernova
 
 import com.datastax.driver.core.{Session, ProtocolOptions, Cluster}
 import akka.actor.ActorSystem

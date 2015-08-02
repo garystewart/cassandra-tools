@@ -1,4 +1,4 @@
-package eu.ganda.reporting
+package team.supernova.reporting
 
 import nl.ing.confluence.rpc.soap.actions.Token
 import nl.ing.confluence.rpc.soap.actions.Page

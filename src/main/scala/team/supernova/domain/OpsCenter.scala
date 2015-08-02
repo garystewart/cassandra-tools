@@ -1,4 +1,4 @@
-package eu.ganda.domain
+package team.supernova.domain
 
 /*   Contains all the structure of objects from OpsCenter
 

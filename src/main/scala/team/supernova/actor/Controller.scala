@@ -1,19 +1,14 @@
-package eu.ganda.actor
+package team.supernova.actor
 
-import akka.actor.Actor.Receive
-import akka.actor.{Props, ActorRef, ActorLogging, Actor}
-import com.datastax.driver.core.{ProtocolOptions, Cluster, Session, SimpleStatement}
-import eu.ganda.{AllClusters, ClusterInfo, OpsCenter}
-import eu.ganda.actor.ClusterInfoActor.GetClusterInfo
-
-
-import eu.ganda.actor.Controller.{GetClusterGroup, Done}
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import com.datastax.driver.core.{Cluster, ProtocolOptions, Session, SimpleStatement}
+import team.supernova.actor.Controller.GetClusterGroup
+import team.supernova.{AllClusters, ClusterInfo, OpsCenter}
 
 
 class Controller extends Actor with ActorLogging  {
-  import eu.ganda.actor.ClusterInfoActor.GetClusterInfo
-  import eu.ganda.actor.ClusterInfoActor.ClusterInfoDone
-  import eu.ganda.actor.Controller.Done
+  import ClusterInfoActor.{ClusterInfoDone, GetClusterInfo}
+  import Controller.Done
 
   //var clusterInfo: ActorRef = ActorRef.noSender
   var counter = 0
@@ -88,8 +83,7 @@ object Controller {
 
 
 class ClusterInfoActor extends Actor with ActorLogging  {
-  import eu.ganda.actor.ClusterInfoActor.GetClusterInfo
-  import eu.ganda.actor.ClusterInfoActor.ClusterInfoDone
+  import ClusterInfoActor.{ClusterInfoDone, GetClusterInfo}
 
   override def receive: Receive = {
     case GetClusterInfo(requester,clusterGroup, clusterName, hosts, uname, pword, graphite_host, graphana_host,ops_hosts, ops_uname, ops_pword ) => {

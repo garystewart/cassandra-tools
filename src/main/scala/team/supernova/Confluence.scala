@@ -1,4 +1,4 @@
-package eu.ganda
+package team.supernova
 
 import nl.ing.confluence.rpc.soap.actions.Page
 import nl.ing.confluence.rpc.soap.beans.RemotePage

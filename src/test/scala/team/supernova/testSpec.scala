@@ -1,4 +1,4 @@
-package eu.ganda
+package team.supernova
 
 /**
  * Created by M06F525 on 10/05/2015.
