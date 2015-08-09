@@ -24,8 +24,8 @@ class ClusterInfoSpec  extends TestKit(ActorSystem("ClusterInfoSpec"))
 with FunSpecLike //with Matchers with BeforeAndAfterAll
 with TestCassandraCluster {
 
-  //val TEST_PROPERTIES="test.properties"
-  val TEST_PROPERTIES="local.properties"
+  val TEST_PROPERTIES="test.properties"
+  //val TEST_PROPERTIES="local.properties"
   val GROUP="LLDS_1"
   val SPACE="KAAS"
   val TOKEN = ConfluenceToken.getConfluenceToken(TEST_PROPERTIES)
@@ -91,10 +91,6 @@ with TestCassandraCluster {
   //      prefix = prefix + "*."
   //    }
   //  }
-
-
-
-
 
 
 

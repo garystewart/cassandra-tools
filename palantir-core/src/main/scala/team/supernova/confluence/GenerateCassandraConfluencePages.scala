@@ -126,52 +126,28 @@ object GenerateCassandraConfluencePages {
 
 
     def tableInfoRows (clusterInfo: ClusterInfo): String = {
-
       try {
-
-        val rows = clusterInfo.opsCenterClusterInfo.get.nodes.foldLeft("") { (accNode, node) =>
-          accNode +
-          node.opsKeyspaceInfoList.sorted.foldLeft("") { (acckeyspaceInfo, keyspaceInfo) =>
-            acckeyspaceInfo +
-              keyspaceInfo.opsTableInfoList.sorted.foldLeft("") { (acctableInfo, tableInfo) =>
-                val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${keyspaceInfo.keyspaceName}"
-                acctableInfo +
-                <tr>
-                  <td><a href={href}>{keyspaceInfo.keyspaceName}</a></td>
-                  <td>{tableInfo.tableName}</td>
-                  <td>{node.name} </td>
-                  <td>{tableInfo.avgDataSizeMB}MB</td>
-                  <td>{tableInfo.numberSSTables}</td>
-                </tr>
-              }
-          }
+        val rows = clusterInfo.opsCenterClusterInfo.get.nodes.
+          flatMap(n => n.opsKeyspaceInfoList.flatMap(k=> k.opsTableInfoList.map(t=> Tuple5(k.keyspaceName, t.tableName, n.name, t.avgDataSizeMB, t.numberSSTables )))).sorted
+          .foldLeft(""){(a,b) =>
+          val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${b._1}"
+        a +
+          <tr>
+            <td><a href={href}>{b._1}</a></td>
+            <td>{b._2}</td>
+            <td>{b._3} </td>
+            <td>{b._4}MB</td>
+            <td>{b._5}</td>
+          </tr>
         }
         <tr><th>Keyspace Name</th><th>Table</th><th>Node</th><th>Total Avg Size</th><th>Number SSTables</th></tr> +
-        rows
+          rows
       }
       catch {case e: Exception =>
         println(s"$e")
         ""
       }
-      //      val rows = clusterInfo.keyspaces.foldLeft(""){(addK,keyspace) =>
-//
-//        addK + clusterInfo.opsCenterClusterInfo.map(_.nodes.map(_.opsKeyspaceInfoList.filter(_.keyspaceName equals keyspace))).foldLeft("") { (c, d) =>
-//          c + d.map(_.map(_.opsTableInfoList)).foldLeft("") {(g, table) =>
-//            val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${keyspace.keyspace_name}"
-//            g +
-//              <tr>
-//                <td><a href={href}>{keyspace.keyspace_name}</a></td>
-//                <td>{table.head.head.tableName } </td>
-//                <td>{ } </td>
-//                <td>{table.head.head.avgDataSizeMB} </td>
-//              </tr>
-//          }
-//        }
-//      }
-//      rows
     }
-
-
 
     val clusterWarnings = clusterInfo.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning")).foldLeft(""){(a,w) => a + w.details + "\n" }
     val clusterErrors = clusterInfo.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error")).foldLeft(""){(a,w) => a + w.details + "\n" }
