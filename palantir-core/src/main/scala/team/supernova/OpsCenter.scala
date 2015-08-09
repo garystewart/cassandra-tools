@@ -1,5 +1,6 @@
 package team.supernova
 
+import org.json4s.jackson.JsonMethods._
 import team.supernova.domain.{CassandraYaml, Login}
 
 import scalaj.http._
@@ -8,9 +9,13 @@ import scalaj.http._
  * Created by Gary Stewart on 4-8-2015.
  *
  */
-case class OpsCenterNode (name: String, cassandra: CassandraYaml )
-case class OpsCenterClusterInfo (login: Login, name: String, nodes: List[OpsCenterNode])
-//case class OpsCenter (login: Login, opsCenterHost: String, clusters: OpsCenterClusterInfo) {}
+case class OpsTableInfo (tableName: String, avgDataSizeMB: Long)
+case class OpsKeyspaceInfo (keyspaceName: String, opsTableInfoList: List[OpsTableInfo])
+case class OpsCenterNode (name: String, cassandra: CassandraYaml, opsKeyspaceInfoList: List[OpsKeyspaceInfo] )
+case class OpsCenterClusterInfo (login: Login,
+                                 name: String,
+                                 nodes: List[OpsCenterNode]
+                                  )
 
 
 object OpsCenter {
@@ -38,36 +43,66 @@ object OpsCenter {
   }
 
 
+//  def getTableSize(login: Login, host: String, uname: String, pword: String, clusterName: String, keyspaceName: String) = {
+//
+//    val table_info = Http(s"http://$host/$clusterName/cluster-metrics/all/$keyspaceName/Users/cf-live-disk-used")
+//      .header("opscenter-session", login.sessionid).header("Accept", "text/json")
+//      .param("function","max").param("start",(System.currentTimeMillis()-10000000).toString).param("end",System.currentTimeMillis().toString)//.param("step","60")
+//      .timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
+//    println(table_info)
+//  }
 
+  def getTableSize(login: Login,
+                   host: String,
+                   uname: String,
+                   pword: String,
+                   clusterName: String,
+                   listKeyspaceInfo: Map[String, List[String]],
+                   node: String
+                    ):  List[OpsKeyspaceInfo] = {
 
-
-  def getTableSize(login: Login, host: String, uname: String, pword: String, clusterName: String, keyspaceName: String) = {
-
-    val table_info = Http(s"http://$host/$clusterName/cluster-metrics/all/$keyspaceName/Users/cf-live-disk-used")
-      .header("opscenter-session", login.sessionid).header("Accept", "text/json")
-      .param("function","max").param("start",(System.currentTimeMillis()-10000000).toString).param("end",System.currentTimeMillis().toString)//.param("step","60")
-      .timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
-    println(table_info)
+    val retVal = listKeyspaceInfo.foldLeft(List[OpsKeyspaceInfo]()){(a,keyspaceName) =>
+      val k = keyspaceName._2.foldLeft(List[OpsTableInfo]()) { (c,tableName) =>
+        val metric = Http(s"http://$host/$clusterName/metrics/$node/${keyspaceName._1}/$tableName/cf-total-disk-used?step=1440").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = 1000, readTimeoutMs = 10000).asString.body
+       // println(metric)
+        val size = (parse(metric) \\ "AVERAGE").children.map(_.values).tail.head.asInstanceOf[List[Double]]
+        println(s"${keyspaceName._1}.$tableName on $node = " +Math.round(size(1) / 1048576) + "Mb")
+        c ++ List(OpsTableInfo(tableName, Math.round(size(1) / 1048576)))
+      }
+      a ++ List(OpsKeyspaceInfo(keyspaceName._1, k ) )
+    }
+    retVal
   }
 
 
+
   //TODO check for more ideas - http://docs.datastax.com/en/opscenter/5.1/api/docs/index.html#
-  def createOpsCenterClusterInfo (host: String, uname: String, pword: String, clusterName: String): Option[OpsCenterClusterInfo] = {
+  def createOpsCenterClusterInfo (host: String,
+                                  uname: String,
+                                  pword: String,
+                                  clusterName: String,
+                                  listKeyspaceInfo: Map[String, List[String]]  //keyspaceNmae List[Tables]
+                                   ): Option[OpsCenterClusterInfo] = {
     try {
+
       //login to OpsCenter and get session id
       val resultLogin = Http(s"http://$host/login").param("username", uname).param("password", pword).timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
       val login = Login.parseLogin(resultLogin)
 
 
-      val nodesRes = Http(s"http://$host/$clusterName/nodes").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
-      //TODO - val nodes = Nodes.parseBody(nodesRes)
+      //TODO - finish off
+      //val nodesRes = Http(s"http://$host/$clusterName/nodes").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
+      //val nodes = Nodes.parseBody(nodesRes)
+
       val listNodeIP = getNodeNames(host, login, clusterName)
       println(s"$clusterName found nodes: $listNodeIP")
       //per node
       val listNodes = listNodeIP.map(node_ip => {
         val nodeIPres = Http(s"http://$host/$clusterName/nodeconf/$node_ip").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = connTimeout, readTimeoutMs = readTimeout).asString.body
-        new OpsCenterNode(node_ip, CassandraYaml.parseBody(nodeIPres))
+        val keyInfo = getTableSize(login,host, uname, pword, clusterName,listKeyspaceInfo, node_ip )
+        new OpsCenterNode(node_ip, CassandraYaml.parseBody(nodeIPres), keyInfo)
       })
+
       Some(new OpsCenterClusterInfo(login, clusterName, listNodes))
     }
     catch {case e: Exception => {
@@ -77,6 +112,9 @@ object OpsCenter {
     }}
   }
 }
+
+
+
 
 
 //TODO - ClusterName now input!  - This code can be used to find unknown cluster :-)

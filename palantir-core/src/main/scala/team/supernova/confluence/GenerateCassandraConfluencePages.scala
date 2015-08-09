@@ -2,10 +2,10 @@ package team.supernova.confluence
 
 import java.util.Calendar
 
-import com.datastax.driver.core.Session
+import com.datastax.driver.core.{Session}
 import team.supernova.confluence.soap.rpc.soap.actions.{Page, Token}
 import team.supernova.confluence.soap.rpc.soap.beans.RemotePage
-import team.supernova.{AllClusters, ClusterInfo, Keyspace, Table}
+import team.supernova._
 
 import scala.collection.SortedSet
 /**
@@ -43,9 +43,8 @@ object GenerateCassandraConfluencePages {
 
   def generateKeyspacePage(keyspace: Keyspace): String= {
 
-    def tableKeyspaceRow (table: Table, k: Keyspace): String = {
+    def generateTablePart (table: Table, k: Keyspace): String = {
       val size = table.columns.size.toString
-      //TODO implement SORTING!!!
       val possibleLinks = k.findPossibleLinks.filter(l => l.from.table_name.equals(table.table_name)).foldLeft(""){(a,p) => a + p.to.table_name + " on (" + p.on +")\n" }
       val queries = table.statements.foldLeft(""){(a,s) => a + s + "\n" }
       val tableWarnings = table.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
@@ -87,7 +86,8 @@ object GenerateCassandraConfluencePages {
 
     val keyspaceWarnings = keyspace.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning")).foldLeft(""){(a,w) => a + w.details + "\n" }
     val keyspaceErrors = keyspace.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error")).foldLeft(""){(a,w) => a + w.details + "\n" }
-    //The actual keyspace page itself
+
+    //The actual page itself
     //need <body> tag otherwise ArrayBuilder is shown on confluence
     <body>{CONFLUENCE_HEADER("This section summarises all the keyspace information.")}<hr/>
       <h1>Keyspace: {keyspace.keyspace_name}</h1>
@@ -98,7 +98,7 @@ object GenerateCassandraConfluencePages {
       <p>
         <table>
           <tbody><tr><th>Table Name</th><th colspan="2">Columns</th><th>Extras</th></tr>
-            {scala.xml.Unparsed( keyspace.tables.foldLeft("") { (at, table) => at +  tableKeyspaceRow (table, keyspace)} )}
+            {scala.xml.Unparsed( keyspace.tables.foldLeft("") { (at, table) => at +  generateTablePart (table, keyspace)} )}
           </tbody>
         </table>
       </p>
@@ -106,9 +106,8 @@ object GenerateCassandraConfluencePages {
   }
 
 
-  def generateClusterInfoPage(project: String, clusterInfo: ClusterInfo): String= {
+  def generateClusterSummaryPage(project: String, clusterInfo: ClusterInfo): String= {
 
-    //TODO add summary of cluster information
     def clusterRow (clusterInfo: ClusterInfo): String = {
       val rows = clusterInfo.keyspaces.foldLeft(""){(a,k) =>
         val warnings = k.checks.filter(!_.hasPassed).foldLeft(""){(a,w) => a + w.details + "\n" }
@@ -124,6 +123,56 @@ object GenerateCassandraConfluencePages {
         }
       rows
     }
+
+
+    def tableInfoRows (clusterInfo: ClusterInfo): String = {
+
+      try {
+
+        val x = clusterInfo.opsCenterClusterInfo.get
+
+        val rows = x.nodes.foldLeft("") { (accNode, node) =>
+          accNode +
+          node.opsKeyspaceInfoList.foldLeft("") { (acckeyspaceInfo, keyspaceInfo) =>
+            acckeyspaceInfo +
+              keyspaceInfo.opsTableInfoList.foldLeft("") { (acctableInfo, tableInfo) =>
+                val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${keyspaceInfo.keyspaceName}"
+                acctableInfo +
+                <tr>
+                  <td><a href={href}>{keyspaceInfo.keyspaceName}</a></td>
+                  <td>{tableInfo.tableName}</td>
+                  <td>{node.name} </td>
+                  <td>{tableInfo.avgDataSizeMB}MB</td>
+                </tr>
+              }
+          }
+        }
+        rows
+      }
+      catch {case e: Exception =>
+        println(s"$e")
+        ""
+      }
+      //      val rows = clusterInfo.keyspaces.foldLeft(""){(addK,keyspace) =>
+//
+//        addK + clusterInfo.opsCenterClusterInfo.map(_.nodes.map(_.opsKeyspaceInfoList.filter(_.keyspaceName equals keyspace))).foldLeft("") { (c, d) =>
+//          c + d.map(_.map(_.opsTableInfoList)).foldLeft("") {(g, table) =>
+//            val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${keyspace.keyspace_name}"
+//            g +
+//              <tr>
+//                <td><a href={href}>{keyspace.keyspace_name}</a></td>
+//                <td>{table.head.head.tableName } </td>
+//                <td>{ } </td>
+//                <td>{table.head.head.avgDataSizeMB} </td>
+//              </tr>
+//          }
+//        }
+//      }
+//      rows
+    }
+
+
+
     val clusterWarnings = clusterInfo.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning")).foldLeft(""){(a,w) => a + w.details + "\n" }
     val clusterErrors = clusterInfo.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error")).foldLeft(""){(a,w) => a + w.details + "\n" }
 
@@ -142,12 +191,13 @@ object GenerateCassandraConfluencePages {
         <h1>Host Information</h1>
         <p>
           <table>
-            <tbody><tr><th>Data Center</th><th>Host Name</th><th>IP Address</th><th>C* Version</th><th>Extras</th></tr>
+            <tbody><tr><th>Data Center</th><th>Host Name</th><th>IP Address</th><th>Rack</th><th>C* Version</th><th>Extras</th></tr>
               {scala.xml.Unparsed( clusterInfo.hosts.to[SortedSet].foldLeft("") { (at, host) => at +
                                             <tr>
                                               <td>{host.dataCenter}</td>
                                               <td>{host.canonicalHostName}</td>
                                               <td>{host.ipAddress}</td>
+                                              <td>{host.rack}</td>
                                               <td>{host.version}</td>
                                               <td>{
                                                 val yaml  =  try { pretty(parse( write(host.opsCenterNode)))}
@@ -167,19 +217,29 @@ object GenerateCassandraConfluencePages {
             </tbody>
           </table>
         </p>
-      </body>.toString
+        <h1>Tables</h1>
+        <p>
+          <table>
+            <tbody><tr><th>Keyspace Name</th><th>Table</th><th>Node</th><th>Total Avg Size</th></tr>
+              {scala.xml.Unparsed( tableInfoRows (clusterInfo) )}
+            </tbody>
+          </table>
+        </p>
+      </body>.toString()
   }
 
+
   //TODO - make graphite checker!!!  Seems to be rather messy
-  //TODO show info in governance schema
-
    //this is using graphana!
-   def clusterGraphite(cluster_name: String,graphana_host: String ) = <a href={s"http://${graphana_host}/dashboard/db/cluster-health-per-cluster?Cluster=${cluster_name}"}>Overview</a>
+  def clusterGraphite(cluster_name: String,graphana_host: String ) = <a href={s"http://${graphana_host}/dashboard/db/cluster-health-per-cluster?Cluster=${cluster_name}"}>Overview</a>
 
-  def generateClusterSummaryPage(allClusters: AllClusters, project: String): String=  {
+  def generateClusterGroupPage(groupClusters: GroupClusters, project: String): String=  {
 
-    val listKeyspace: SortedSet[String] = allClusters.clusterInfoList.flatMap(_.keyspaces).map(_.keyspace_name).to[SortedSet]
-    val listClusterName = allClusters.clusterInfoList.map(_.cluster_name).toSet
+    val listKeyspace: SortedSet[String] = groupClusters.clusterInfoList.flatMap(_.keyspaces).map(_.keyspace_name)
+
+    //this must not be sorted as it is already sorted - just need the list of names!
+    val listClusterName: List[String] = groupClusters.clusterInfoList.foldLeft(List[String]()){(a,b) => a ++ List(b.cluster_name)}
+    println (s"Cluster List: $listClusterName")
 
     def whichColourClassBoolean(isTrue: Boolean): String =  if (isTrue) {"highlight-green confluenceTd"} else {"highlight-red confluenceTd"}
 
@@ -188,7 +248,7 @@ object GenerateCassandraConfluencePages {
       <p>
         <table>
           <tbody><tr><th>Cluster Name</th><th>Metrics</th><th>Total Errors</th><th>Total Warnings</th><th>Extras</th><th>Last Checked</th></tr>
-            {scala.xml.Unparsed( allClusters.clusterInfoList.foldLeft("") { (at, clus) =>
+            {scala.xml.Unparsed( groupClusters.clusterInfoList.foldLeft("") { (at, clus) =>
             val warnings = clus.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("warning"))
             val errors = clus.checks.filterNot(_.hasPassed).filter(c => c.severity.equals("error"))
             at +
@@ -214,17 +274,17 @@ object GenerateCassandraConfluencePages {
             <tr>
               <th>Keyspace Name</th>
               {scala.xml.Unparsed( listClusterName.foldLeft("") { (acc, clust_name) => acc +
-              <th>{clust_name}</th> + <th>Total</th>})
+              <th>{clust_name}</th> + <th>#Tables</th>})
               }
             </tr>
             {scala.xml.Unparsed( listKeyspace.foldLeft("") { (acc, key: String) => acc +
             <tr>
               <td>{ key }</td>
               {scala.xml.Unparsed( listClusterName.foldLeft("") { (acc, clust_name) =>
-              val isFound = allClusters.clusterInfoList.filter(a => a.cluster_name.equals(clust_name)).flatMap(_.keyspaces).count(k => k.keyspace_name.equals(key)) > 0
+              val isFound = groupClusters.clusterInfoList.filter(a => a.cluster_name.equals(clust_name)).flatMap(_.keyspaces).count(k => k.keyspace_name.equals(key)) > 0
               //TODO fix LINKS!! make more reusable
               acc + <td class={whichColourClassBoolean(isFound)}>{ if (isFound) {<a href={s"/display/$project/${clust_name.replace(" ","+")}+-+$key"}>{isFound}</a>} else isFound }</td> +
-                    <td class={whichColourClassBoolean(isFound)}>{ if (isFound) {allClusters.clusterInfoList.filter(a => a.cluster_name.equals(clust_name)).flatMap(_.keyspaces).filter(_.keyspace_name == key).head.tables.size.toString} else ""}</td>})
+                    <td class={whichColourClassBoolean(isFound)}>{ if (isFound) {groupClusters.clusterInfoList.filter(a => a.cluster_name.equals(clust_name)).flatMap(_.keyspaces).filter(_.keyspace_name == key).head.tables.size.toString} else ""}</td>})
               }
             </tr>
           } )
@@ -232,16 +292,20 @@ object GenerateCassandraConfluencePages {
           </tbody>
         </table>
       </p>
-    </body>.toString
+    </body>.toString()
   }
 
 
 
-  def generateAllConfluencePages (project: String, mainPageName: String, session : Session,
-                                  token: Token, deletePages: Boolean): Unit = {
+  //TODO create Cluster page if not exits and group page if does not exist!
+  //TODO CHeck if gets updated the first ever time
+    def generateAllConfluencePages ( allClusters    : GroupClusters,
+                                     project        : String,
+                                     mainPageName   : String,
+                                     token          : Token,
+                                     deletePages    : Boolean): Unit = {
 
     //login into confluence
-    val allClusters = ClusterInfo.createClusterInfo(session, mainPageName)
     val page: Page = new Page
 
     //Find the main Clusters page
@@ -249,7 +313,6 @@ object GenerateCassandraConfluencePages {
     val tokenPageName = mainPageName + "-TOKEN"
 
     //read token page
-
     var tokenPage: RemotePage = null
     try {
       println (s"Reading $tokenPageName page")
@@ -264,12 +327,13 @@ object GenerateCassandraConfluencePages {
         newPage.setSpace(parentPage.getSpace)
         page.store(newPage)
         println (s"$tokenPageName page created!")
+        tokenPage = newPage
       }
     }
 
 
     //Always update the Cluster page
-    parentPage.setContent( s"<body>${generateClusterSummaryPage(allClusters, project)}</body>")
+    parentPage.setContent( s"<body>${generateClusterGroupPage(allClusters, project)}</body>")
     page.store(parentPage)
 
 
@@ -282,7 +346,7 @@ object GenerateCassandraConfluencePages {
       yield {
         val clusterPageName = cl.cluster_name.toUpperCase
         //create the specific summary cluster page
-        tokenContent = tokenContent +"<br/>"+ Confluence.confluenceCreatePage (project,clusterPageName, generateClusterInfoPage(project, cl), page, parentPage, tokenPage )
+        tokenContent = tokenContent +"<br/>"+ Confluence.confluenceCreatePage (project,clusterPageName, generateClusterSummaryPage(project, cl), page, parentPage, tokenPage )
         val clusterParentPage: RemotePage = page.read(project,clusterPageName)
 
         //Per keyspace create pages
@@ -300,8 +364,6 @@ object GenerateCassandraConfluencePages {
     tokenPage.setContent(tokenContent)
     page.store(tokenPage)
     println (s"TOKEN page updated!")
-
-
 
 
    //clean up pages no longer needed - ie keyspace deleted
@@ -337,5 +399,6 @@ object GenerateCassandraConfluencePages {
 //        }
       }
   }
+
 
 }

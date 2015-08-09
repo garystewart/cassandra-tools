@@ -4,14 +4,14 @@ import com.datastax.driver.core._
 import com.datastax.driver.core.policies.ConstantSpeculativeExecutionPolicy
 import scala.collection.JavaConversions._
 import scala.collection.SortedSet
-import ganda._
+import checks._
 
 /**
  * Created by Gary Stewart on 4-8-2015.
  *
  */
 
-object ganda {
+object checks {
   def combineChecks(acc: List[Check], checkable: List[Checkable]): List[Check] =
     acc ++ checkable.flatMap(_.checks)
 }
@@ -59,12 +59,16 @@ case class Column(columnMetadata: ColumnMetadata, keyType: String) extends Check
   val children = List.empty
 }
 
-case class Table(tableMetadata: TableMetadata) extends Checkable {
+case class Table(tableMetadata: TableMetadata) extends Checkable  with Ordered [Table] {
+
+  def compare (that: Table) = {
+    this.table_name.compareTo(that.table_name)
+  }
 
   val keyspace_name = tableMetadata.getKeyspace.getName
   val table_name = tableMetadata.getName
   val comments = tableMetadata.getOptions.getComment
-  val cql = tableMetadata.exportAsString
+  val cql = tableMetadata.exportAsString  //this includes indexes
   val pkColumns: List[Column] = tableMetadata.getPartitionKey.foldLeft(List[Column]()) { (a, p) => a ++ List(Column(p, "partition_key")) }
   val ckColumns: List[Column] = tableMetadata.getClusteringColumns.foldLeft(List[Column]()) { (a, p) => a ++ List(Column(p, "clustering_key")) }
   val regularColumns: List[Column] = tableMetadata.getColumns.filter(c => !tableMetadata.getPrimaryKey.contains(c)).foldLeft(List[Column]()) { (a, p) => a ++ List(Column(p, "regular")) }
@@ -116,8 +120,9 @@ case class Keyspace(keyspaceMetaData: KeyspaceMetadata, private val validDCnames
   def compare(that: Keyspace): Int = this.keyspace_name.toLowerCase compare that.keyspace_name.toLowerCase
 
   val keyspace_name = keyspaceMetaData.getName
-  val schemaScript = keyspaceMetaData.exportAsString()
-  val tables: List[Table] = keyspaceMetaData.getTables.foldLeft(List[Table]()) { (a, t) => a ++ List(Table(t)) }
+  //TODO fix so that it is the entire schema
+  val schemaScript = keyspaceMetaData.asCQLQuery()  //only contains the keyspace
+  val tables: List[Table] = keyspaceMetaData.getTables.foldLeft(List[Table]()) { (a, t) => a ++ List(Table(t)) }.sorted
   //TODO make more elegant!
   val dataCenter: SortedSet[String] = keyspaceMetaData.getReplication.filterNot(a => a._1.equals("class")).filterNot(b => b._1.equals("replication_factor")).map(_._1).to
 
@@ -168,17 +173,25 @@ case class NodeHost(host: Host, opsCenterNode: Option[OpsCenterNode]) extends Or
 
 
 case class ClusterInfo(metaData: Metadata,
-                       opsCenterClusterInfo: Option[OpsCenterClusterInfo],
+                       //opsCenterClusterInfo: Option[OpsCenterClusterInfo],
                        graphite_host: String,
-                       graphana_host: String
-                        ) extends Checkable {
+                       graphana_host: String,
+                       sequence: Int,
+                       ops_hosts: String,
+                       ops_uname: String,
+                       ops_pword: String)
+  extends Checkable with Ordered[ClusterInfo] {
+
   val cluster_name = metaData.getClusterName
   val schemaAgreement = metaData.checkSchemaAgreement()
   val dataCenter: SortedSet[String] = metaData.getAllHosts.groupBy(h => h.getDatacenter).keys.to
   val keyspaces: SortedSet[Keyspace] = metaData.getKeyspaces.map(i => {
     new Keyspace(i, dataCenter)
   }).to
-  val hosts = metaData.getAllHosts.map(h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getAddress.getHostAddress)))))
+
+  val opsKeyInfo: Map[String, List[String]]  = keyspaces.foldLeft(Map[String, List[String]]()){ (a,b) => a ++ Map( b.keyspace_name -> b.tables.map(_.table_name) ) }
+  val opsCenterClusterInfo: Option[OpsCenterClusterInfo] = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, cluster_name, opsKeyInfo )
+  val hosts = metaData.getAllHosts.map(h => new NodeHost(h, opsCenterClusterInfo.flatMap(a => a.nodes.find(n => n.name.equals(h.getSocketAddress.getAddress.getHostAddress)))))
   //
   //TODO add cluster checks summary  ie check DC names etc!
   //TODO implement compare keyspaces - one cluster to another
@@ -188,9 +201,16 @@ case class ClusterInfo(metaData: Metadata,
   )
 
   val children = keyspaces.toList
+
+  def compare(that: ClusterInfo): Int = {
+    println (s"${this.cluster_name} compared to ${that.cluster_name}  = ${this.sequence compareTo that.sequence}")
+    this.sequence.toString compare that.sequence.toString
+  }
+
+
 }
 
-case class AllClusters(clusterInfoList: List[ClusterInfo]) {
+case class GroupClusters(clusterInfoList: SortedSet[ClusterInfo]) {
 
   val checks: List[Check] = {
     val clusterChecks = List(
@@ -202,10 +222,12 @@ case class AllClusters(clusterInfoList: List[ClusterInfo]) {
 }
 
 
+
+
 //TODO most of this can be removed due to Actor setup :-)
 object ClusterInfo {
 
-  def createClusterInfo(session: Session, group: String): AllClusters = {
+  def createClusterInfo(session: Session, group: String): GroupClusters = {
     val clusterRes = session.execute(new SimpleStatement(s"select * from cluster where group='$group'"))
 
     //per CLuster
@@ -219,8 +241,7 @@ object ClusterInfo {
         val ops_pword = row.getString("ops_pword")
         val ops_hosts = row.getString("opscenter")
 
-        val opsCenterClusterInfo = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, cluster_name)
-
+       // val opsCenterClusterInfo = OpsCenter.createOpsCenterClusterInfo(ops_hosts, ops_uname, ops_pword, cluster_name)
 
         //cluster config
         val uname = row.getString("uname")
@@ -228,10 +249,11 @@ object ClusterInfo {
         val hosts = row.getString("hosts").split(",")
         val port = row.getInt("port")
 
+        val sequence = row.getInt("sequence")
+
         //graphite
         val graphite_host = row.getString("graphite")
         val graphana_host = row.getString("graphana")
-
 
         //TODO add error handling and make reactive!
         lazy val clusSes: Session =
@@ -243,11 +265,13 @@ object ClusterInfo {
             withPort(port).
             build().
             connect()
-        val clusterInfo = List(ClusterInfo(clusSes.getCluster.getMetadata, opsCenterClusterInfo, graphite_host, graphana_host))
+        val clusterInfo = List(ClusterInfo(clusSes.getCluster.getMetadata, graphite_host, graphana_host, sequence, ops_hosts, ops_uname, ops_pword))
         clusSes.close()
         println(s"$cluster_name - finished")
         a ++ clusterInfo
       }
-    AllClusters(clusterList)
+    GroupClusters(clusterList.sorted.to[SortedSet])
   }
+
+
 }
