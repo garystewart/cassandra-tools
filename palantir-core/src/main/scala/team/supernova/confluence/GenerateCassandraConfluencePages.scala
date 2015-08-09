@@ -176,7 +176,7 @@ object GenerateCassandraConfluencePages {
                                               <td>{host.rack}</td>
                                               <td>{host.version}</td>
                                               <td>{
-                                                val yaml  =  try { pretty(parse( write(host.opsCenterNode)))}
+                                                val yaml  =  try { pretty(parse( write(host.opsCenterNode.head.cassandra ) ))}
                                                  catch {case e: Exception => ""}
                                                 Confluence.confluenceCodeBlock("Yaml",yaml  ,"none")}</td>
                                             </tr>
