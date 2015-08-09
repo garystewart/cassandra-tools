@@ -9,8 +9,17 @@ import scalaj.http._
  * Created by Gary Stewart on 4-8-2015.
  *
  */
-case class OpsTableInfo (tableName: String, avgDataSizeMB: Long)
-case class OpsKeyspaceInfo (keyspaceName: String, opsTableInfoList: List[OpsTableInfo])
+case class OpsTableInfo (tableName: String, avgDataSizeMB: Long, numberSSTables: Long) extends Ordered [OpsTableInfo] {
+  def compare (that: OpsTableInfo) = {
+    this.tableName.compareTo(that.tableName)
+  }
+}
+
+case class OpsKeyspaceInfo (keyspaceName: String, opsTableInfoList: List[OpsTableInfo]) extends Ordered [OpsKeyspaceInfo] {
+  def compare (that: OpsKeyspaceInfo) = {
+    this.keyspaceName.compareTo(that.keyspaceName)
+  }
+}
 case class OpsCenterNode (name: String, cassandra: CassandraYaml, opsKeyspaceInfoList: List[OpsKeyspaceInfo] )
 case class OpsCenterClusterInfo (login: Login,
                                  name: String,
@@ -63,17 +72,32 @@ object OpsCenter {
 
     val retVal = listKeyspaceInfo.foldLeft(List[OpsKeyspaceInfo]()){(a,keyspaceName) =>
       val k = keyspaceName._2.foldLeft(List[OpsTableInfo]()) { (c,tableName) =>
-        val metric = Http(s"http://$host/$clusterName/metrics/$node/${keyspaceName._1}/$tableName/cf-total-disk-used?step=1440").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = 1000, readTimeoutMs = 10000).asString.body
-       // println(metric)
-        val size = (parse(metric) \\ "AVERAGE").children.map(_.values).tail.head.asInstanceOf[List[Double]]
-        println(s"${keyspaceName._1}.$tableName on $node = " +Math.round(size(1) / 1048576) + "Mb")
-        c ++ List(OpsTableInfo(tableName, Math.round(size(1) / 1048576)))
+
+        c ++ List(OpsTableInfo(tableName,
+          Math.round(getMetricTable(login, host, uname, pword, clusterName, node, keyspaceName._1, tableName, "cf-total-disk-used") / 1048576),
+          getMetricTable(login, host, uname, pword, clusterName, node, keyspaceName._1, tableName, "cf-live-sstables").toLong )
+        )
       }
       a ++ List(OpsKeyspaceInfo(keyspaceName._1, k ) )
     }
     retVal
   }
 
+
+  def getMetricTable(login: Login,
+                     host: String,
+                     uname: String,
+                     pword: String,
+                     clusterName: String,
+                     node: String,
+                     keyspaceName: String,
+                     tableName: String,
+                     metricName: String ) : Double = {
+    val metric = Http(s"http://$host/$clusterName/metrics/$node/${keyspaceName}/$tableName/$metricName?step=1440").header("opscenter-session", login.sessionid).header("Accept", "text/json").timeout(connTimeoutMs = 1000, readTimeoutMs = 10000).asString.body
+    var retVal = (parse(metric) \\ "AVERAGE").children.map(_.values).tail.head.asInstanceOf[List[Double]](1)
+    println (s"$clusterName.$keyspaceName.$tableName $metricName on $node = $retVal ")
+    retVal
+  }
 
 
   //TODO check for more ideas - http://docs.datastax.com/en/opscenter/5.1/api/docs/index.html#

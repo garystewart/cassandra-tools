@@ -115,7 +115,11 @@ case class Table(tableMetadata: TableMetadata) extends Checkable  with Ordered [
 case class Link(from: Table, to: Table, on: String)
 
 
-case class Keyspace(keyspaceMetaData: KeyspaceMetadata, private val validDCnames: SortedSet[String]) extends Checkable with Ordered[Keyspace] {
+case class Keyspace(  keyspaceMetaData: KeyspaceMetadata,
+                      private val validDCnames: SortedSet[String]
+                     )
+  extends Checkable with Ordered[Keyspace] {
+
 
   def compare(that: Keyspace): Int = this.keyspace_name.toLowerCase compare that.keyspace_name.toLowerCase
 

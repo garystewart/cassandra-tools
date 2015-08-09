@@ -129,13 +129,11 @@ object GenerateCassandraConfluencePages {
 
       try {
 
-        val x = clusterInfo.opsCenterClusterInfo.get
-
-        val rows = x.nodes.foldLeft("") { (accNode, node) =>
+        val rows = clusterInfo.opsCenterClusterInfo.get.nodes.foldLeft("") { (accNode, node) =>
           accNode +
-          node.opsKeyspaceInfoList.foldLeft("") { (acckeyspaceInfo, keyspaceInfo) =>
+          node.opsKeyspaceInfoList.sorted.foldLeft("") { (acckeyspaceInfo, keyspaceInfo) =>
             acckeyspaceInfo +
-              keyspaceInfo.opsTableInfoList.foldLeft("") { (acctableInfo, tableInfo) =>
+              keyspaceInfo.opsTableInfoList.sorted.foldLeft("") { (acctableInfo, tableInfo) =>
                 val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${keyspaceInfo.keyspaceName}"
                 acctableInfo +
                 <tr>
@@ -143,10 +141,12 @@ object GenerateCassandraConfluencePages {
                   <td>{tableInfo.tableName}</td>
                   <td>{node.name} </td>
                   <td>{tableInfo.avgDataSizeMB}MB</td>
+                  <td>{tableInfo.numberSSTables}</td>
                 </tr>
               }
           }
         }
+        <tr><th>Keyspace Name</th><th>Table</th><th>Node</th><th>Total Avg Size</th><th>Number SSTables</th></tr> +
         rows
       }
       catch {case e: Exception =>
@@ -220,7 +220,7 @@ object GenerateCassandraConfluencePages {
         <h1>Tables</h1>
         <p>
           <table>
-            <tbody><tr><th>Keyspace Name</th><th>Table</th><th>Node</th><th>Total Avg Size</th></tr>
+            <tbody>
               {scala.xml.Unparsed( tableInfoRows (clusterInfo) )}
             </tbody>
           </table>
