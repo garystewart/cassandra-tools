@@ -145,7 +145,7 @@ object GenerateCassandraConfluencePages {
                 <tr>
                   <td><a href={href}>{keyspace._1}</a></td>
                   <td>{table._1}</td>
-                  <td>{scala.xml.Unparsed( table._2.foldLeft(""){(c, n)=> c + s"<p>${n._3} - ${n._4}MB - ${n._5} sstables</p>"})} </td>
+                  <td>{scala.xml.Unparsed( table._2.toSeq.sortBy(_._3).foldLeft(""){(c, n)=> c + s"<p>${n._3} - ${n._4}MB - ${n._5} sstables</p>"})} </td>
                   <td>{table._2.foldLeft(0.toLong){(c, n)=> c + n._4}}MB</td>
                   <td>{table._2.map(_._4).min}MB</td>
                   <td>{table._2.map(_._4).max}MB</td>
