@@ -24,8 +24,8 @@ class ClusterInfoSpec  extends TestKit(ActorSystem("ClusterInfoSpec"))
 with FunSpecLike //with Matchers with BeforeAndAfterAll
 with TestCassandraCluster {
 
-  val TEST_PROPERTIES="test.properties"
-  //val TEST_PROPERTIES="local.properties"
+  //val TEST_PROPERTIES="test.properties"
+  val TEST_PROPERTIES="local.properties"
   val GROUP="LLDS_1"
   val SPACE="KAAS"
   val TOKEN = ConfluenceToken.getConfluenceToken(TEST_PROPERTIES)
@@ -48,8 +48,8 @@ with TestCassandraCluster {
 
   it  ("Confluence Test Read Page") {
     val token: Token = ConfluenceToken.getConfluenceToken (TEST_PROPERTIES)
-    //val pageName = "Test - D3.js chart"
-    val pageName = "<Keyspace Name>"
+    val pageName = "SN-GRID-PRD"
+    //val pageName = "<Keyspace Name>"
 
     val page: Page = new Page
     val parentPage: RemotePage = page.read(SPACE, pageName)

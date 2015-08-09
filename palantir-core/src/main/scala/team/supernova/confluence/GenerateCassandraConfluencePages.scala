@@ -127,20 +127,35 @@ object GenerateCassandraConfluencePages {
 
     def tableInfoRows (clusterInfo: ClusterInfo): String = {
       try {
+//        val tuples = clusterInfo.opsCenterClusterInfo.get.nodes.
+//          flatMap(n => n.opsKeyspaceInfoList.flatMap(k=> k.opsTableInfoList.map(t=> Tuple5(k.keyspaceName, t.tableName, n.name, t.avgDataSizeMB, t.numberSSTables )))).sorted
+//        val x = tuples.groupBy(_._1).flatMap(a => a._2).groupBy(_._2)
+
+
         val rows = clusterInfo.opsCenterClusterInfo.get.nodes.
-          flatMap(n => n.opsKeyspaceInfoList.flatMap(k=> k.opsTableInfoList.map(t=> Tuple5(k.keyspaceName, t.tableName, n.name, t.avgDataSizeMB, t.numberSSTables )))).sorted
-          .foldLeft(""){(a,b) =>
-          val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${b._1}"
-        a +
-          <tr>
-            <td><a href={href}>{b._1}</a></td>
-            <td>{b._2}</td>
-            <td>{b._3} </td>
-            <td>{b._4}MB</td>
-            <td>{b._5}</td>
-          </tr>
-        }
-        <tr><th>Keyspace Name</th><th>Table</th><th>Node</th><th>Total Avg Size</th><th>Number SSTables</th></tr> +
+          flatMap(n => n.opsKeyspaceInfoList.flatMap(k=> k.opsTableInfoList.map(t=> Tuple5(k.keyspaceName, t.tableName, n.name, t.avgDataSizeMB, t.numberSSTables ))))
+          .groupBy(_._1).toSeq.sortBy(_._1)
+          .foldLeft(""){(a,keyspace) =>
+              val href = s"/display/$project/${clusterInfo.cluster_name.replace(" ", "+")}+-+${keyspace._1}"
+
+              a +
+              keyspace._2.groupBy(_._2).toSeq.sortBy(_._1).foldLeft(""){(b, table) =>
+                //first row
+                b +
+                <tr>
+                  <td><a href={href}>{keyspace._1}</a></td>
+                  <td>{table._1}</td>
+                  <td>{scala.xml.Unparsed( table._2.foldLeft(""){(c, n)=> c + s"<p>${n._3} - ${n._4}MB - ${n._5} sstables</p>"})} </td>
+                  <td>{table._2.foldLeft(0.toLong){(c, n)=> c + n._4}}MB</td>
+                  <td>{table._2.map(_._4).min}MB</td>
+                  <td>{table._2.map(_._4).max}MB</td>
+                  <td>{table._2.map(_._4).max - table._2.map(_._4).min}MB</td>
+                  <td>{table._2.foldLeft(0.toLong){(c, n)=> c + n._5}}</td>
+                </tr>
+              }
+          }
+
+        <tr><th>Keyspace Name</th><th>Table</th><th>Node</th><th>Total Size</th><th>Min Size</th><th>Max Size</th><th>Difference (Max-Min)</th><th>Total SSTables</th></tr> +
           rows
       }
       catch {case e: Exception =>
